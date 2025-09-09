@@ -1,0 +1,79 @@
+name: meatyprojects
+
+services:
+  api:
+    build:
+      context: ./app/api
+      dockerfile: Dockerfile
+    env_file: .env
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./app/api:/app/api
+      - ./app/cli:/app/cli
+      - ./app/worker:/app/worker
+      - ./data:/data
+    ports:
+      - "${API_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  worker:
+    build:
+      context: ./app/worker
+      dockerfile: Dockerfile
+    env_file: .env
+    environment:
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      - api
+      - redis
+    volumes:
+      - ./app/api:/app/api
+      - ./app/worker:/app/worker
+      - ./data:/data
+
+  frontend:
+    build:
+      context: ./app/frontend
+      dockerfile: Dockerfile
+    env_file: .env
+    environment:
+      - NEXT_PUBLIC_API_BASE=http://proxy:8080/api
+    depends_on:
+      - api
+    volumes:
+      - ./app/frontend:/app
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  proxy:
+    image: caddy:2-alpine
+    depends_on:
+      - api
+      - frontend
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+
+  otel-collector:
+    image: otel/opentelemetry-collector:0.95.0
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./ops/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+    ports:
+      - "4317:4317"
+
+volumes:
+  data:
+    driver: local
+
