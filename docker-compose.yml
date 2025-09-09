@@ -1,5 +1,4 @@
-name: meatyprojects
-
+version: '3.3'
 services:
   api:
     build:
@@ -71,7 +70,7 @@ services:
     volumes:
       - ./ops/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
     ports:
-      - "4317:4317"
+      - "4327:4317"
 
 volumes:
   data:

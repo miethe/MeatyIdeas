@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import logging
+import logging as std_logging
 import sys
 from typing import Any
 
@@ -22,12 +22,12 @@ def setup_logging() -> None:
         cache_logger_on_first_use=True,
     )
 
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(logging.Formatter("%(message)s"))
-    root = logging.getLogger()
+    handler = std_logging.StreamHandler(sys.stdout)
+    handler.setFormatter(std_logging.Formatter("%(message)s"))
+    root = std_logging.getLogger()
     root.handlers.clear()
     root.addHandler(handler)
-    root.setLevel(logging.INFO)
+    root.setLevel(std_logging.INFO)
 
 
 def get_logger(**kwargs: Any) -> structlog.stdlib.BoundLogger:

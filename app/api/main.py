@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
 from .db import Base, engine, init_db
-from .logging import setup_logging
+from .app_logging import setup_logging
 from .models import *  # noqa
 from .routers import projects, files, search, artifacts, bundles
 from .settings import settings

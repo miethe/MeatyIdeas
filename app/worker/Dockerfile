@@ -5,10 +5,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1
 
+
 WORKDIR /app
 
-COPY requirements.txt /app/requirements.txt
-RUN pip install --upgrade pip && pip install -r /app/requirements.txt
+# Copy requirements.txt from build context (which is ./app/worker)
+COPY requirements.txt /app/worker/requirements.txt
+
+RUN pip install --upgrade pip && pip install -r /app/worker/requirements.txt
 
 COPY . /app
 
