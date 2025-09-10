@@ -14,7 +14,9 @@
     "incremental": true,
     "strict": true,
     "baseUrl": ".",
-    "paths": {},
+    "paths": {
+      "@/*": ["./*"]
+    },
     "allowJs": true,
     "skipLibCheck": true,
     "esModuleInterop": true,
