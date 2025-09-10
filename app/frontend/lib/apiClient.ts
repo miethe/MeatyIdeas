@@ -4,18 +4,16 @@ export interface ApiClientOptions {
 }
 
 export function getApiBase() {
-  // 1. Use env variable if set
-  if (process.env.NEXT_PUBLIC_API_BASE) return process.env.NEXT_PUBLIC_API_BASE;
-  // 2. Allow override via ?apiBase= for debugging
+  // Prefer same-origin in the browser to avoid stale envs
   if (typeof window !== 'undefined') {
-    const params = new URLSearchParams(window.location.search);
-    const override = params.get('apiBase');
-    if (override) return override;
-    // 3. Default to same-origin when in browser (behind proxy)
-    return `${window.location.origin}/api`;
+    const params = new URLSearchParams(window.location.search)
+    const override = params.get('apiBase')
+    if (override) return override
+    return `${window.location.origin}/api`
   }
-  // 4. Fallback for SSR/process usage
-  return 'http://localhost:8081/api';
+  // On server/SSR, allow env override, else fallback to proxy
+  if (process.env.NEXT_PUBLIC_API_BASE) return process.env.NEXT_PUBLIC_API_BASE
+  return 'http://localhost:8081/api'
 }
 
 export function getToken() {
