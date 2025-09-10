@@ -5,9 +5,9 @@ Quickstart
 - Prereqs: Docker, Docker Compose v2
 - Copy `.env.example` to `.env` (optional; defaults are fine)
 - Run: `docker compose up --build`
-- App URL: http://localhost:8080
-- API base: http://localhost:8080/api
-- OpenAPI: http://localhost:8080/api/docs
+- App URL: http://localhost:8081
+- API base: http://localhost:8081/api
+- OpenAPI: http://localhost:8081/api/docs
 
 CLI
 
@@ -26,4 +26,3 @@ Acceptance
 Docs
 
 - See `docs/` for deploy, bundle schema, git setup, and seed details.
-

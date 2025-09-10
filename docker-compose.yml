@@ -13,7 +13,7 @@ services:
       - ./app/worker:/app/worker
       - ./data:/data
     ports:
-      - "${API_PORT:-8000}:8000"
+      - "8000:8000"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/healthz"]
       interval: 10s
@@ -40,14 +40,12 @@ services:
       context: ./app/frontend
       dockerfile: Dockerfile
     env_file: .env
-    environment:
-      - NEXT_PUBLIC_API_BASE=http://proxy:8080/api
     depends_on:
       - api
     volumes:
       - ./app/frontend:/app
     ports:
-      - "${WEB_PORT:-3000}:3000"
+      - "3000:3000"
 
   redis:
     image: redis:7-alpine
@@ -56,11 +54,10 @@ services:
 
   proxy:
     image: caddy:2-alpine
+    network_mode: host
     depends_on:
       - api
       - frontend
-    ports:
-      - "8080:8080"
     volumes:
       - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
 
@@ -76,3 +73,7 @@ volumes:
   data:
     driver: local
 
+networks:
+  default:
+    name: meatyideas_net
+    driver: bridge

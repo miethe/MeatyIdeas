@@ -1,13 +1,9 @@
-:8080
+:8081
 
 route /api* {
-  uri strip_prefix /api
-  reverse_proxy api:8000 {
-    header_up X-Forwarded-Prefix /api
-  }
+  reverse_proxy localhost:8000
 }
 
 route * {
-  reverse_proxy frontend:3000
+  reverse_proxy localhost:3000
 }
-

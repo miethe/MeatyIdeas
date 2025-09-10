@@ -6,7 +6,10 @@ import { Moon, Sun } from 'lucide-react'
 
 export function ThemeToggle() {
   const { theme, setTheme, resolvedTheme } = useTheme()
+  const [mounted, setMounted] = React.useState(false)
+  React.useEffect(() => setMounted(true), [])
   const isDark = (resolvedTheme || theme) === 'dark'
+  if (!mounted) return null
   return (
     <Button
       variant="outline"
