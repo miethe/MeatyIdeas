@@ -23,19 +23,8 @@ export function CommandPalette({ children }: Props) {
     queryKey: ['search', q],
     queryFn: async () => {
       if (!q || q.length < 2) return [] as any[]
-      const rows = await apiGet<any[]>(`/search?q=${encodeURIComponent(q)}`)
-      // fetch minimal file details
-      const items = await Promise.all(
-        rows.slice(0, 10).map(async (r) => {
-          try {
-            const f = await apiGet<any>(`/files/${r.file_id}`)
-            return { type: 'file', id: f.id, title: f.title, path: f.path, project_id: f.project_id }
-          } catch {
-            return null
-          }
-        })
-      )
-      return items.filter(Boolean) as any[]
+      const rows = await apiGet<any[]>(`/search?q=${encodeURIComponent(q)}&limit=10`)
+      return rows.map((r) => ({ type: 'file', id: r.file_id, title: r.title, path: r.path, project_id: r.project_id }))
     },
   })
 

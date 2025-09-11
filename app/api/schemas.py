@@ -39,6 +39,7 @@ class FileCreate(BaseModel):
     title: str | None = None
     tags: list[str] = Field(default_factory=list)
     front_matter: dict[str, Any] = Field(default_factory=dict)
+    rewrite_links: bool = True
 
 
 class FileRead(BaseModel):
@@ -64,15 +65,49 @@ class ArtifactsConnectRequest(BaseModel):
 class ArtifactsCommitRequest(BaseModel):
     paths: list[str] = Field(default_factory=list)
     message: str | None = None
+    push: bool = True
 
+
+class BundleSelection(BaseModel):
+    file_ids: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+    roles: dict[str, str] = Field(default_factory=dict)
 
 class BundleCreateRequest(BaseModel):
+    # Back-compat: allow root-level file_ids but prefer selection
     file_ids: list[str] = Field(default_factory=list)
+    selection: BundleSelection | None = None
     include_checksums: bool = True
     push_branch: bool = False
+    open_pr: bool = False
 
 
-class BundleCreateResponse(BaseModel):
-    zip_path: str
+class BundleRead(BaseModel):
+    id: str
+    project_id: str
+    status: str
+    output_path: str
+    created_at: dt.datetime
+    error: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
     branch: str | None = None
+    pr_url: str | None = None
 
+    class Config:
+        from_attributes = True
+
+
+class ArtifactsStatus(BaseModel):
+    provider: str
+    repo_url: str | None
+    branch: str | None
+    ahead: int
+    behind: int
+    last_sync: dt.datetime | None
+
+
+class CommitEntry(BaseModel):
+    sha: str
+    author: str | None
+    message: str
+    date: dt.datetime

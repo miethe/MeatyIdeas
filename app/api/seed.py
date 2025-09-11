@@ -4,9 +4,10 @@ import os
 
 from sqlalchemy import select
 
-from .db import SessionLocal
+from .db import SessionLocal, engine
 from .models import Project, File
 from .utils import slugify
+from .search import index_file
 
 
 DEMO_NAME = "demo-idea-stream"
@@ -33,8 +34,27 @@ def ensure_seed() -> None:
                 "# Trimmed PRD\n\nThis is a demo PRD excerpt.",
             ),
         ]
+        # lightweight renderer
+        try:
+            from markdown_it import MarkdownIt
+
+            md = MarkdownIt("commonmark").enable("table").enable("strikethrough")
+            def render(md_text: str) -> str:
+                return md.render(md_text)
+        except Exception:
+            def render(md_text: str) -> str:
+                return md_text
+
         for path, content in files:
-            f = File(project_id=p.id, path=path, title=os.path.basename(path), front_matter={}, content_md=content, rendered_html="", tags=["demo"]) 
+            f = File(
+                project_id=p.id,
+                path=path,
+                title=os.path.basename(path),
+                front_matter={},
+                content_md=content,
+                rendered_html=render(content),
+                tags=["demo"],
+            ) 
             db.add(f)
             db.commit()
             db.refresh(f)
@@ -49,10 +69,12 @@ def ensure_seed() -> None:
             os.makedirs(os.path.dirname(abs_path), exist_ok=True)
             with open(abs_path, "w") as fh:
                 fh.write(content)
+            # index FTS (title + content)
+            with engine.begin() as conn:
+                index_file(conn, f.id, f"{f.title}\n{f.content_md}")
     finally:
         db.close()
 
 
 if __name__ == "__main__":
     ensure_seed()
-

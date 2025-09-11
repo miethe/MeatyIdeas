@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     otel_exporter_otlp_endpoint: str | None = None
     otel_service_name: str = "meatyprojects-api"
     seed_demo: int = 1
+    github_token: str | None = None
 
     class Config:
         env_file = ".env"
@@ -18,4 +19,3 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
-

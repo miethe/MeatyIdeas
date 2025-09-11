@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button'
 import { span } from '@/lib/telemetry'
 import { ArtifactsPanel } from '@/components/artifacts-panel'
 import { ExportBundleDialog } from '@/components/export-bundle-dialog'
+import { ProjectEvents } from '@/components/projects/project-events'
 
 export default function ProjectPage() {
   const params = useParams<{ project: string }>()
@@ -64,6 +65,7 @@ export default function ProjectPage() {
 
   return (
     <AppShell>
+      {projectId && <ProjectEvents projectId={projectId} />}
       <div className="mb-6 flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">{proj.data?.name || 'Project'}</h1>
@@ -108,4 +110,3 @@ export default function ProjectPage() {
     </AppShell>
   )
 }
-

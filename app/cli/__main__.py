@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sys
 from typing import Optional
+import time
 
 import requests
 import typer
@@ -85,9 +86,48 @@ def bundle_create(project: str, all: bool = typer.Option(True, help="Include all
     file_ids = [f["id"] for f in r.json()]
     r = s.post(f"{cfg.api_base}/projects/{p['id']}/export/bundle", data=json.dumps({"file_ids": file_ids}))
     r.raise_for_status()
-    typer.echo(r.json()["zip_path"]) 
+    job_id = r.json().get("job_id")
+    if not job_id:
+        typer.echo("No job id returned", err=True)
+        raise typer.Exit(code=1)
+    typer.echo(f"job:{job_id}")
+    # poll until finished
+    while True:
+        time.sleep(0.5)
+        jr = s.get(f"{cfg.api_base}/jobs/{job_id}")
+        jr.raise_for_status()
+        j = jr.json()
+        if j.get("status") == "finished":
+            res = j.get("result") or {}
+            typer.echo(res.get("zip_path", ""))
+            break
+        if j.get("status") == "failed":
+            typer.echo("job failed", err=True)
+            raise typer.Exit(code=1)
+
+
+@app.command()
+def jobs_watch(id: str):
+    """Watch a job until completion, printing status updates."""
+    cfg, s = client()
+    last = None
+    while True:
+        time.sleep(0.5)
+        r = s.get(f"{cfg.api_base}/jobs/{id}")
+        r.raise_for_status()
+        j = r.json()
+        status = j.get("status")
+        if status != last:
+            typer.echo(f"{status}")
+            last = status
+        if status == "finished":
+            if j.get("result"):
+                typer.echo(json.dumps(j["result"]))
+            break
+        if status == "failed":
+            typer.echo("failed", err=True)
+            raise typer.Exit(code=1)
 
 
 if __name__ == "__main__":
     app()
-

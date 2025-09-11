@@ -15,6 +15,7 @@ from ..settings import settings
 from ..utils import safe_join
 import os
 from ..search import index_file
+from ..links import upsert_links, rewrite_wikilinks
 
 
 router = APIRouter(prefix="/files", tags=["files"])
@@ -64,6 +65,8 @@ def create_file(project_id: str, body: FileCreate, db: Session = Depends(get_db)
     # index
     with engine.begin() as conn:
         index_file(conn, f.id, f"{f.title}\n{f.content_md}")
+    # links
+    upsert_links(db, project_id, f, body.content_md)
     return f
 
 
@@ -80,6 +83,7 @@ def update_file(file_id: str, body: FileCreate, db: Session = Depends(get_db)):
     f = db.get(File, file_id)
     if not f:
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND"})
+    old_title = f.title
     f.path = body.path
     f.title = body.title or f.title
     f.front_matter = body.front_matter
@@ -99,7 +103,30 @@ def update_file(file_id: str, body: FileCreate, db: Session = Depends(get_db)):
     # index
     with engine.begin() as conn:
         index_file(conn, f.id, f"{f.title}\n{f.content_md}")
+    # links
+    upsert_links(db, f.project_id, f, body.content_md)
+    # rewrite links if title changed
+    if body.rewrite_links and old_title and f.title != old_title:
+        rewrite_wikilinks(db, f.project_id, old_title, f.title)
     return f
+
+
+@router.get("/{file_id}/backlinks", response_model=List[FileRead])
+def get_backlinks(file_id: str, db: Session = Depends(get_db)):
+    f = db.get(File, file_id)
+    if not f:
+        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND"})
+    # Backlinks: direct matches by target_file_id OR unresolved titles matching this file's title
+    from ..models import Link
+    src_ids = [
+        l.src_file_id
+        for l in db.query(Link).filter(
+            (Link.project_id == f.project_id)
+            & ((Link.target_file_id == f.id) | ((Link.target_file_id.is_(None)) & (Link.target_title == f.title)))
+        ).all()
+    ]
+    rows = db.query(File).filter(File.id.in_(src_ids)).all()
+    return rows
 
 
 @router.delete("/{file_id}", status_code=204)

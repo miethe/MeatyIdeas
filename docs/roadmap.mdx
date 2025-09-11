@@ -1,0 +1,71 @@
+# Roadmap
+
+import { Tabs, Tab } from 'nextra-theme-docs'
+
+This roadmap is synthesized from the PRD (`docs/PRD.md`) and enhancement addendum.
+
+## Milestones
+
+- M0 Foundations — repo, compose, API health, seed
+- M1 Editor + Links — files CRUD, markdown render, wiki-links/backlinks
+- M2 Search 2.0 — FTS snippets, filters, saved searches, semantic (flagged)
+- M3 Bundles v2 — wizard, roles, verify, branch/PR (optional)
+- M4 Artifacts v2 — connect, status, commit/push, history
+- M5 Activity/SSE — events db + SSE toasts, job progress
+- M6 Optional Postgres/Semantic — pgvector + embeddings worker
+
+## Epics → Stories → Acceptance
+
+### EPIC A — Editor + Links
+
+- Story: Create/Edit Markdown
+  - Acceptance: GFM tables, code, Mermaid, KaTeX render in preview.
+- Story: Wiki-links `[[Title]]` → resolve/create
+  - Acceptance: Backlinks list shows referencing files; rename updates links.
+- Story: Attachments under `/artifacts/assets/...`
+  - Acceptance: Inline images render; sanitized paths.
+
+### EPIC B — Search 2.0
+
+- Story: FTS with snippets and filters
+  - Acceptance: Query returns `{file_id,title,path,snippet,score}`; filtered by project/tag/status.
+- Story: Saved searches
+  - Acceptance: Create/list saved queries; command palette supports `tag:` and `status:`.
+- Story: Semantic (flag)
+  - Acceptance: When enabled, semantic results labeled with confidence.
+
+### EPIC C — Bundles v2
+
+- Story: Wizard selection + roles
+  - Acceptance: Preview `bundle.yaml`; include checksums.
+- Story: Export job and status
+  - Acceptance: API returns job id; UI shows progress; zip exists under project bundles.
+- Story: Branch + PR (optional)
+  - Acceptance: Branch created `bundle/<slug>/<ts>`; PR URL returned when configured.
+
+### EPIC D — Artifacts v2
+
+- Story: Connect repo
+  - Acceptance: Status shows provider/branch/last sync.
+- Story: Commit/push
+  - Acceptance: Returns `{commit_sha,pushed}`; typed errors (e.g., `GIT_AUTH_FAILED`).
+- Story: History
+  - Acceptance: List last N commits with message and SHA.
+
+### EPIC E — Projects Home
+
+- Story: Board view by status
+  - Acceptance: Drag updates status; filters combine; favorites persist.
+
+### EPIC F — Activity & SSE
+
+- Story: Events store
+  - Acceptance: `events` persisted with `{type,payload,created_at}`.
+- Story: SSE stream
+  - Acceptance: `/api/events/stream?project_id=` emits job/file events; UI toasts.
+
+## Acceptance Summary
+
+- `docker compose up` → API `/api/healthz`, OpenAPI `/api/docs`, UI up.
+- Seed project/files present; search returns snippets; bundle zip created; SSE toasts on bundle/commit.
+

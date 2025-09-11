@@ -35,6 +35,31 @@ def init_db() -> None:
         )
         conn.commit()
 
+    # Lightweight migration for bundles table new columns (SQLite only)
+    try:
+        with engine.connect() as conn:
+            # Inspect existing columns
+            cols = [row[1] for row in conn.exec_driver_sql("PRAGMA table_info('bundles')").fetchall()]
+            alters: list[str] = []
+            if cols:
+                if "status" not in cols:
+                    alters.append("ALTER TABLE bundles ADD COLUMN status VARCHAR DEFAULT 'completed'")
+                if "error" not in cols:
+                    alters.append("ALTER TABLE bundles ADD COLUMN error TEXT DEFAULT ''")
+                if "metadata" not in cols:
+                    alters.append("ALTER TABLE bundles ADD COLUMN metadata JSON")
+                if "branch" not in cols:
+                    alters.append("ALTER TABLE bundles ADD COLUMN branch VARCHAR NULL")
+                if "pr_url" not in cols:
+                    alters.append("ALTER TABLE bundles ADD COLUMN pr_url VARCHAR NULL")
+                for stmt in alters:
+                    conn.exec_driver_sql(stmt)
+                if alters:
+                    conn.commit()
+    except Exception:
+        # Best-effort; in fresh DB create_all will suffice
+        pass
+
 
 @contextmanager
 def session_scope() -> Generator:
@@ -47,4 +72,3 @@ def session_scope() -> Generator:
         raise
     finally:
         session.close()
-

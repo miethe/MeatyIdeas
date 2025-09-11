@@ -5,7 +5,10 @@
 - N: New project (global)
 - Esc: Close dialogs/modals
 
-Future
-- ⌘S: Save draft (editor phase)
-- Within search: Arrow keys navigate, Enter opens
+Editor
+- ⌘S: Save now (also autosaves)
+- ⌘N: New file
+- ⌘P: Command palette
 
+Search
+- Within search: Arrow keys navigate, Enter opens

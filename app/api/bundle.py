@@ -23,6 +23,8 @@ def export_bundle(
     project_slug: str,
     project_dir: str,
     file_rel_paths: Iterable[str],
+    include_checksums: bool = True,
+    roles: dict[str, str] | None = None,
 ) -> str:
     bundles_dir = os.path.join(project_dir, "bundles")
     os.makedirs(bundles_dir, exist_ok=True)
@@ -30,13 +32,14 @@ def export_bundle(
     zip_path = os.path.join(bundles_dir, f"{project_slug}-{ts}.zip")
 
     files_info = []
+    roles = roles or {}
     for rel in file_rel_paths:
         abs_path = os.path.join(project_dir, rel)
         files_info.append(
             {
                 "path": rel,
-                "sha256": sha256_file(abs_path) if os.path.exists(abs_path) else "",
-                "role": "",
+                "sha256": sha256_file(abs_path) if include_checksums and os.path.exists(abs_path) else "",
+                "role": roles.get(rel) or roles.get(os.path.basename(rel)) or "",
             }
         )
 
@@ -62,4 +65,3 @@ def export_bundle(
 
 def export_bundle_cli() -> None:
     print("Use API endpoint /api/projects/{id}/export/bundle to create bundles.")
-

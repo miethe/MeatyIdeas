@@ -88,6 +88,9 @@ export function ItemModalViewer({ file, onClose, projectId, onDeleted }: Props) 
                   <div className="mb-4 text-sm text-muted-foreground">{file.path}</div>
                   <MarkdownViewer html={file.rendered_html} md={file.content_md} />
                   <div className="mt-6 flex items-center justify-end gap-2">
+                    {file && (
+                      <a className="underline-offset-2 hover:underline" href={`/projects/${file.project_id}/edit/${file.id}`}>Open in Editor</a>
+                    )}
                     <Button variant="outline" onClick={() => setIsEditing(true)}>Edit</Button>
                     {file && (
                       <Button variant="destructive" onClick={() => del.mutate(file.id)}>
