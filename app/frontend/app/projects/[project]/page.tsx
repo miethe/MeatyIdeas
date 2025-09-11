@@ -1,5 +1,5 @@
 "use client"
-import React from 'react'
+import React, { useState, useEffect } from 'react'
 import { useParams, useSearchParams } from 'next/navigation'
 import { useQuery } from '@tanstack/react-query'
 import { apiGet } from '@/lib/apiClient'
@@ -20,15 +20,15 @@ export default function ProjectPage() {
   const search = useSearchParams()
   const openFileId = search.get('file')
   const projectParam = params.project
-  const [projectId, setProjectId] = React.useState<string | null>(null)
-  const [selected, setSelected] = React.useState<FileItem | null>(null)
+  const [projectId, setProjectId] = useState<string | null>(null)
+  const [selected, setSelected] = useState<FileItem | null>(null)
 
   const projList = useQuery({
     queryKey: ['projects'],
     queryFn: async () => apiGet<any[]>(`/projects`),
   })
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (!projectParam) return
     const isUuid = /^[0-9a-fA-F-]{16,}$/.test(projectParam)
     if (isUuid) setProjectId(projectParam)
@@ -52,14 +52,14 @@ export default function ProjectPage() {
     enabled: !!projectId,
   })
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (openFileId && files.data) {
       const f = files.data.find((x) => x.id === openFileId)
       if (f) setSelected(f)
     }
   }, [openFileId, files.data])
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (projectId) span('ui.click.project', { id: projectId })
   }, [projectId])
 

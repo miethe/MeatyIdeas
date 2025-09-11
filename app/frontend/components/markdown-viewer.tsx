@@ -1,10 +1,10 @@
 "use client"
-import React from 'react'
+import React, { useRef, useEffect } from 'react'
 
 export function MarkdownViewer({ html, md }: { html: string; md?: string }) {
-  const ref = React.useRef<HTMLDivElement>(null)
+  const ref = useRef<HTMLDivElement>(null)
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (!ref.current) return
     // Syntax highlighting via Prism CSS theme if available
     // Mermaid blocks: look for <code class="language-mermaid">...</code>

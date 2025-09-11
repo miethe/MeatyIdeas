@@ -1,5 +1,5 @@
 "use client"
-import React from 'react'
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { Button } from '@/components/ui/button'
 import { apiGet, apiJson } from '@/lib/apiClient'
 import { FileItem, FileSchema } from '@/lib/types'
@@ -19,18 +19,18 @@ const templates: Record<string, string> = {
 }
 
 export function RichEditor({ projectId, fileId }: Props) {
-  const [file, setFile] = React.useState<FileItem | null>(null)
-  const [title, setTitle] = React.useState('')
-  const [path, setPath] = React.useState('')
-  const [content, setContent] = React.useState('')
-  const [html, setHtml] = React.useState('')
-  const [backlinks, setBacklinks] = React.useState<FileItem[]>([])
-  const [rewrite, setRewrite] = React.useState(true)
-  const inputRef = React.useRef<HTMLTextAreaElement>(null)
-  const fileInputRef = React.useRef<HTMLInputElement>(null)
-  const [lastSaved, setLastSaved] = React.useState<{ title: string; path: string; content: string } | null>(null)
+  const [file, setFile] = useState<FileItem | null>(null)
+  const [title, setTitle] = useState('')
+  const [path, setPath] = useState('')
+  const [content, setContent] = useState('')
+  const [html, setHtml] = useState('')
+  const [backlinks, setBacklinks] = useState<FileItem[]>([])
+  const [rewrite, setRewrite] = useState(true)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [lastSaved, setLastSaved] = useState<{ title: string; path: string; content: string } | null>(null)
 
-  React.useEffect(() => {
+  useEffect(() => {
     async function load() {
       const f = await apiGet<any>(`/files/${fileId}`)
       const fi = FileSchema.parse(f)
@@ -52,7 +52,7 @@ export function RichEditor({ projectId, fileId }: Props) {
   }, [fileId])
 
   // Debounced preview
-  React.useEffect(() => {
+  useEffect(() => {
     const t = setTimeout(async () => {
       try {
         const r = await apiJson<any>('POST', '/render/markdown', { md: content })
@@ -62,13 +62,13 @@ export function RichEditor({ projectId, fileId }: Props) {
     return () => clearTimeout(t)
   }, [content])
 
-  const dirty = React.useMemo(() => {
+  const dirty = useMemo(() => {
     if (!lastSaved) return false
     return lastSaved.title !== title || lastSaved.path !== path || lastSaved.content !== content
   }, [lastSaved, title, path, content])
 
   // Shortcuts
-  React.useEffect(() => {
+  useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const isMeta = e.metaKey || e.ctrlKey
       if (isMeta && e.key.toLowerCase() === 's') {
@@ -168,8 +168,8 @@ export function RichEditor({ projectId, fileId }: Props) {
     }
   }
 
-  const [allFiles, setAllFiles] = React.useState<FileItem[]>([])
-  React.useEffect(() => {
+  const [allFiles, setAllFiles] = useState<FileItem[]>([])
+  useEffect(() => {
     async function load() {
       try {
         const projFiles = await apiGet<any[]>(`/projects/${projectId}/files`)

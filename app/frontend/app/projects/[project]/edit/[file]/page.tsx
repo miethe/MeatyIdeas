@@ -1,5 +1,5 @@
 "use client"
-import React from 'react'
+import React, { useState, useEffect } from 'react'
 import { useParams } from 'next/navigation'
 import { AppShell } from '@/components/app-shell'
 import { RichEditor } from '@/components/editor/rich-editor'
@@ -9,9 +9,9 @@ export default function EditorPage() {
   const params = useParams<{ project: string; file: string }>()
   const projectParam = params.project
   const file = params.file
-  const [projectId, setProjectId] = React.useState<string | null>(null)
+  const [projectId, setProjectId] = useState<string | null>(null)
 
-  React.useEffect(() => {
+  useEffect(() => {
     async function resolveProject() {
       const isUuid = /^[0-9a-fA-F-]{16,}$/.test(projectParam)
       if (isUuid) {

@@ -53,7 +53,7 @@ def export_project_bundle(project_id: str, body: BundleCreateRequest, db: Sessio
         "push_branch": body.push_branch,
         "open_pr": body.open_pr,
     }
-    b = Bundle(project_id=p.id, selection={"file_ids": file_ids}, output_path="", status="queued", error="", metadata=meta, branch=None, pr_url=None)
+    b = Bundle(project_id=p.id, selection={"file_ids": file_ids}, output_path="", status="queued", error="", bundle_metadata=meta, branch=None, pr_url=None)
     db.add(b)
     db.commit()
     db.refresh(b)

@@ -1,6 +1,6 @@
 "use client"
 
-import React from 'react'
+import React, { useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { apiGet } from '@/lib/apiClient'
 import { Project, ProjectSchema } from '@/lib/types'
@@ -35,7 +35,7 @@ export default function Page() {
     staleTime: 5_000,
   })
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (!isLoading) span('ui.load.projects', { count: data?.length || 0 })
   }, [isLoading])
 

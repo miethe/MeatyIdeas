@@ -85,7 +85,7 @@ class Bundle(Base):
     output_path: Mapped[str] = mapped_column(String, nullable=False)
     status: Mapped[str] = mapped_column(String, default="completed")
     error: Mapped[str] = mapped_column(Text, default="")
-    metadata: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    bundle_metadata: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     branch: Mapped[str | None] = mapped_column(String, nullable=True)
     pr_url: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now_utc)

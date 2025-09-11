@@ -46,8 +46,8 @@ def init_db() -> None:
                     alters.append("ALTER TABLE bundles ADD COLUMN status VARCHAR DEFAULT 'completed'")
                 if "error" not in cols:
                     alters.append("ALTER TABLE bundles ADD COLUMN error TEXT DEFAULT ''")
-                if "metadata" not in cols:
-                    alters.append("ALTER TABLE bundles ADD COLUMN metadata JSON")
+                if "bundle_metadata" not in cols:
+                    alters.append("ALTER TABLE bundles ADD COLUMN bundle_metadata JSON")
                 if "branch" not in cols:
                     alters.append("ALTER TABLE bundles ADD COLUMN branch VARCHAR NULL")
                 if "pr_url" not in cols:

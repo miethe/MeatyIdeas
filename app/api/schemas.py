@@ -89,7 +89,7 @@ class BundleRead(BaseModel):
     output_path: str
     created_at: dt.datetime
     error: str | None = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    bundle_metadata: dict[str, Any] = Field(default_factory=dict)
     branch: str | None = None
     pr_url: str | None = None
 

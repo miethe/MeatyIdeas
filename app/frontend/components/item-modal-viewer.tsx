@@ -1,5 +1,5 @@
 "use client"
-import React from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { FileItem } from '@/lib/types'
 import { Button } from '@/components/ui/button'
@@ -13,12 +13,12 @@ type Props = { file: FileItem | null; onClose: () => void; projectId?: string; o
 
 export function ItemModalViewer({ file, onClose, projectId, onDeleted }: Props) {
   const qc = useQueryClient()
-  const [isEditing, setIsEditing] = React.useState(false)
-  const [title, setTitle] = React.useState('')
-  const [path, setPath] = React.useState('')
-  const [tags, setTags] = React.useState('')
-  const [content, setContent] = React.useState('')
-  React.useEffect(() => {
+  const [isEditing, setIsEditing] = useState(false)
+  const [title, setTitle] = useState('')
+  const [path, setPath] = useState('')
+  const [tags, setTags] = useState('')
+  const [content, setContent] = useState('')
+  useEffect(() => {
     if (!file) return
     setIsEditing(false)
     setTitle(file.title || '')
@@ -56,8 +56,8 @@ export function ItemModalViewer({ file, onClose, projectId, onDeleted }: Props) 
     },
     onError: () => toast.error('Failed to update file'),
   })
-  const tocRef = React.useRef<HTMLDivElement>(null)
-  React.useEffect(() => {
+  const tocRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
     if (!file) return
     // generate IDs for headings and a simple ToC
     const container = document.querySelector('#md-view')

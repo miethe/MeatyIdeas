@@ -1,5 +1,5 @@
 "use client"
-import React from 'react'
+import React, { useState, useEffect } from 'react'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
 import { Button } from '@/components/ui/button'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -8,11 +8,11 @@ import { span } from '@/lib/telemetry'
 import { toast } from 'sonner'
 
 export function ProjectCreateSheet({ children }: { children: React.ReactNode }) {
-  const [open, setOpen] = React.useState(false)
-  const [name, setName] = React.useState('')
-  const [description, setDescription] = React.useState('')
-  const [status, setStatus] = React.useState('idea')
-  const [tags, setTags] = React.useState('')
+  const [open, setOpen] = useState(false)
+  const [name, setName] = useState('')
+  const [description, setDescription] = useState('')
+  const [status, setStatus] = useState('idea')
+  const [tags, setTags] = useState('')
   const qc = useQueryClient()
   const create = useMutation({
     mutationFn: async () =>
@@ -37,7 +37,7 @@ export function ProjectCreateSheet({ children }: { children: React.ReactNode }) 
     onError: () => toast.error('Failed to create project'),
   })
 
-  React.useEffect(() => {
+  useEffect(() => {
     function open() {
       setOpen(true)
     }
