@@ -13,6 +13,7 @@ from ..models import File, Project
 from ..schemas import FileCreate, FileRead
 from ..settings import settings
 from ..utils import safe_join
+import os
 from ..search import index_file
 
 
@@ -106,9 +107,19 @@ def delete_file(file_id: str, db: Session = Depends(get_db)):
     f = db.get(File, file_id)
     if not f:
         return
+    # remove on-disk file if present
+    try:
+        project = db.get(Project, f.project_id)
+        if project:
+            proj_dir = os.path.join(settings.data_dir, "projects", project.slug)
+            abs_path = safe_join(proj_dir, "files", f.path)
+            if os.path.isfile(abs_path):
+                os.remove(abs_path)
+    except Exception:
+        # best-effort removal; continue with DB deletion
+        pass
     db.delete(f)
     db.commit()
     with engine.begin() as conn:
         conn.execute(text("DELETE FROM search_index WHERE file_id = :fid"), {"fid": file_id})
     return
-

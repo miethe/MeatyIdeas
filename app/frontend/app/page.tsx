@@ -14,6 +14,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiJson } from '@/lib/apiClient'
 import { toast } from 'sonner'
 import { span } from '@/lib/telemetry'
+import { ProjectEditDialog } from '@/components/projects/project-edit-dialog'
 
 export default function Page() {
   const qc = useQueryClient()
@@ -69,7 +70,9 @@ export default function Page() {
                           </button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem disabled>Edit (soon)</DropdownMenuItem>
+                          <ProjectEditDialog project={p}>
+                            <DropdownMenuItem onSelect={(e) => e.preventDefault()}>Edit</DropdownMenuItem>
+                          </ProjectEditDialog>
                           <DropdownMenuSeparator />
                           <DropdownMenuItem className="text-destructive" onSelect={() => del.mutate(p.id)}>
                             <Trash2 className="mr-2 h-4 w-4" /> Delete

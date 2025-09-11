@@ -13,6 +13,19 @@ type Props = { file: FileItem | null; onClose: () => void; projectId?: string; o
 
 export function ItemModalViewer({ file, onClose, projectId, onDeleted }: Props) {
   const qc = useQueryClient()
+  const [isEditing, setIsEditing] = React.useState(false)
+  const [title, setTitle] = React.useState('')
+  const [path, setPath] = React.useState('')
+  const [tags, setTags] = React.useState('')
+  const [content, setContent] = React.useState('')
+  React.useEffect(() => {
+    if (!file) return
+    setIsEditing(false)
+    setTitle(file.title || '')
+    setPath(file.path || '')
+    setTags((file.tags || []).join(', '))
+    setContent(file.content_md || '')
+  }, [file?.id])
   const del = useMutation({
     mutationFn: async (id: string) => apiJson('DELETE', `/files/${id}`, null as any),
     onSuccess: () => {
@@ -23,6 +36,25 @@ export function ItemModalViewer({ file, onClose, projectId, onDeleted }: Props) 
       onClose()
     },
     onError: () => toast.error('Failed to delete file'),
+  })
+  const update = useMutation({
+    mutationFn: async () =>
+      apiJson('PUT', `/files/${file!.id}`, {
+        title: title || undefined,
+        path: path,
+        content_md: content,
+        tags: tags
+          .split(',')
+          .map((t) => t.trim())
+          .filter(Boolean),
+        front_matter: {},
+      }),
+    onSuccess: () => {
+      toast.success('File updated')
+      if (projectId) qc.invalidateQueries({ queryKey: ['files', projectId] })
+      setIsEditing(false)
+    },
+    onError: () => toast.error('Failed to update file'),
   })
   const tocRef = React.useRef<HTMLDivElement>(null)
   React.useEffect(() => {
@@ -50,16 +82,52 @@ export function ItemModalViewer({ file, onClose, projectId, onDeleted }: Props) 
         {file && (
           <div className="grid grid-cols-[1fr_240px] gap-6">
             <article id="md-view" className="prose prose-invert max-w-none dark:prose-invert overflow-y-auto pr-2">
-              <h1 className="mb-2 text-2xl font-bold">{file.title}</h1>
-              <div className="mb-4 text-sm text-muted-foreground">{file.path}</div>
-              <MarkdownViewer html={file.rendered_html} md={file.content_md} />
-              <div className="mt-6 flex items-center justify-end gap-2">
-                {file && (
-                  <Button variant="destructive" onClick={() => del.mutate(file.id)}>
-                    Delete
-                  </Button>
-                )}
-              </div>
+              {!isEditing ? (
+                <>
+                  <h1 className="mb-2 text-2xl font-bold">{file.title}</h1>
+                  <div className="mb-4 text-sm text-muted-foreground">{file.path}</div>
+                  <MarkdownViewer html={file.rendered_html} md={file.content_md} />
+                  <div className="mt-6 flex items-center justify-end gap-2">
+                    <Button variant="outline" onClick={() => setIsEditing(true)}>Edit</Button>
+                    {file && (
+                      <Button variant="destructive" onClick={() => del.mutate(file.id)}>
+                        Delete
+                      </Button>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <form
+                  className="mt-1 space-y-3"
+                  onSubmit={(e) => {
+                    e.preventDefault()
+                    update.mutate()
+                  }}
+                >
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-sm">Title</label>
+                      <input value={title} onChange={(e) => setTitle(e.target.value)} className="focus-ring block w-full rounded-md border bg-background px-3 py-2" />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-sm">Path</label>
+                      <input value={path} onChange={(e) => setPath(e.target.value)} className="focus-ring block w-full rounded-md border bg-background px-3 py-2" />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-sm">Tags (comma separated)</label>
+                    <input value={tags} onChange={(e) => setTags(e.target.value)} className="focus-ring block w-full rounded-md border bg-background px-3 py-2" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-sm">Content</label>
+                    <textarea value={content} onChange={(e) => setContent(e.target.value)} className="focus-ring block h-44 w-full rounded-md border bg-background px-3 py-2 font-mono text-sm" />
+                  </div>
+                  <div className="flex items-center justify-end gap-2 pt-2">
+                    <Button type="button" variant="outline" onClick={() => setIsEditing(false)}>Cancel</Button>
+                    <Button type="submit" disabled={update.isPending}>Save</Button>
+                  </div>
+                </form>
+              )}
             </article>
             <aside className="hidden max-h-[70vh] overflow-y-auto border-l pl-4 md:block">
               <div className="mb-2 text-sm font-semibold">Contents</div>

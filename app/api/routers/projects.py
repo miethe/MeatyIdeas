@@ -5,15 +5,18 @@ import os
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
-from ..db import SessionLocal
+from ..db import SessionLocal, engine
 from ..models import Project
 from ..models import File
+from ..models import ArtifactRepo
+from ..models import Bundle
 from ..schemas import ProjectCreate, ProjectRead, FileRead
 from ..settings import settings
 from ..utils import slugify
+import shutil
 
 
 router = APIRouter(prefix="/projects", tags=["projects"])
@@ -89,6 +92,32 @@ def delete_project(project_id: str, db: Session = Depends(get_db)):
     p = db.get(Project, project_id)
     if not p:
         return
+    # Delete related rows first to avoid FK constraint errors
+    # Files (and search index)
+    file_ids = [f.id for f in db.scalars(select(File).where(File.project_id == project_id)).all()]
+    for fid in file_ids:
+        with engine.begin() as conn:
+            conn.execute(text("DELETE FROM search_index WHERE file_id = :fid"), {"fid": fid})
+    db.query(File).filter(File.project_id == project_id).delete(synchronize_session=False)
+
+    # Artifact repos
+    db.query(ArtifactRepo).filter(ArtifactRepo.project_id == project_id).delete(synchronize_session=False)
+
+    # Bundles (if any are persisted in future)
+    try:
+        db.query(Bundle).filter(Bundle.project_id == project_id).delete(synchronize_session=False)
+    except Exception:
+        # Table may be unused; ignore
+        pass
+
+    # Remove on-disk project directory
+    proj_dir = os.path.join(settings.data_dir, "projects", p.slug)
+    try:
+        shutil.rmtree(proj_dir)
+    except FileNotFoundError:
+        pass
+
+    # Finally delete the project itself
     db.delete(p)
     db.commit()
     return

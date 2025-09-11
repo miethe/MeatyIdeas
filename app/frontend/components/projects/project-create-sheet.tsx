@@ -73,8 +73,9 @@ export function ProjectCreateSheet({ children }: { children: React.ReactNode }) 
               <label className="text-sm">Status</label>
               <select value={status} onChange={(e) => setStatus(e.target.value)} className="focus-ring block w-full rounded-md border bg-background px-3 py-2">
                 <option value="idea">Idea</option>
-                <option value="active">Active</option>
-                <option value="paused">Paused</option>
+                <option value="discovery">Discovery</option>
+                <option value="draft">Draft</option>
+                <option value="live">Live</option>
               </select>
             </div>
             <div className="space-y-1">

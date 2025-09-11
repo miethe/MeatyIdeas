@@ -41,5 +41,8 @@ export async function apiJson<T>(method: string, path: string, body: any, opts: 
     body: body ? JSON.stringify(body) : undefined,
   })
   if (!res.ok) throw Object.assign(new Error(`${method} ${path} failed`), { status: res.status })
-  return res.json()
+  // Gracefully handle 204/empty responses
+  if (res.status === 204) return null as unknown as T
+  const text = await res.text()
+  return (text ? JSON.parse(text) : null) as unknown as T
 }
