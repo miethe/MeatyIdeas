@@ -16,7 +16,18 @@ class GitError(Exception):
 def ensure_repo(path: str, repo_url: str | None = None) -> Repo:
     os.makedirs(path, exist_ok=True)
     if (os.path.isdir(os.path.join(path, ".git"))):
-        return Repo(path)
+        repo = Repo(path)
+        if repo_url:
+            try:
+                names = [r.name for r in repo.remotes]
+                if 'origin' in names:
+                    if repo.remotes.origin.url != repo_url:
+                        repo.remotes.origin.set_url(repo_url)
+                else:
+                    repo.create_remote('origin', repo_url)
+            except GitCommandError as e:
+                raise GitError("GIT_REMOTE_FAILED", str(e))
+        return repo
     if repo_url:
         try:
             return Repo.clone_from(repo_url, path)

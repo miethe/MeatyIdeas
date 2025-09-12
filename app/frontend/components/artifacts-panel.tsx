@@ -2,10 +2,10 @@
 import React from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiGet, apiJson } from '@/lib/apiClient'
 import { toast } from 'sonner'
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 
 type Status = { provider: string, repo_url?: string | null, branch?: string | null, ahead: number, behind: number, last_sync?: string | null }
 type Commit = { sha: string, author?: string | null, message: string, date: string }
@@ -43,20 +43,69 @@ function CommitDialog({ projectId }: { projectId: string }) {
             <input type="checkbox" checked={push} onChange={(e) => setPush(e.target.checked)} />
           </label>
         </div>
-        <DialogFooter>
+        <div className="flex justify-end">
           <Button onClick={() => commitMut.mutate()} disabled={commitMut.isPending}>Commit</Button>
-        </DialogFooter>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function ConnectRepoDialog({ projectId, onConnected }: { projectId: string, onConnected?: () => void }) {
+  const [open, setOpen] = React.useState(false)
+  const [provider, setProvider] = React.useState<'local' | 'github'>('local')
+  const [visibility, setVisibility] = React.useState<'private' | 'public'>('private')
+  const [repoUrl, setRepoUrl] = React.useState('')
+  const connectMut = useMutation({
+    mutationFn: async () => apiJson('POST', `/projects/${projectId}/artifacts/connect`, { provider, visibility, repo_url: provider === 'local' ? null : repoUrl }),
+    onSuccess: () => { toast.success('Artifacts repo connected'); setOpen(false); onConnected?.() },
+    onError: (err: any) => {
+      const msg = err?.status === 400 ? 'Invalid repo or auth' : 'Failed to connect artifacts repo'
+      toast.error(msg)
+    },
+  })
+  const canSubmit = provider === 'local' || (provider !== 'local' && repoUrl.trim().length > 0)
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button>Connect repo</Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Connect Artifacts Repository</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3 text-sm">
+          <label className="flex items-center gap-2">
+            <div className="w-28 text-right text-muted-foreground">Provider</div>
+            <select className="flex-1 rounded border bg-background px-2 py-1" value={provider} onChange={(e) => setProvider(e.target.value as any)}>
+              <option value="local">Local</option>
+              <option value="github">GitHub</option>
+            </select>
+          </label>
+          {provider !== 'local' && (
+            <label className="flex items-center gap-2">
+              <div className="w-28 text-right text-muted-foreground">Repo URL</div>
+              <input className="flex-1 rounded border bg-background px-2 py-1" value={repoUrl} onChange={(e) => setRepoUrl(e.target.value)} placeholder="git@github.com:org/repo.git" />
+            </label>
+          )}
+          <label className="flex items-center gap-2">
+            <div className="w-28 text-right text-muted-foreground">Visibility</div>
+            <select className="flex-1 rounded border bg-background px-2 py-1" value={visibility} onChange={(e) => setVisibility(e.target.value as any)}>
+              <option value="private">Private</option>
+              <option value="public">Public</option>
+            </select>
+          </label>
+        </div>
+        <div className="flex justify-end">
+          <Button onClick={() => connectMut.mutate()} disabled={!canSubmit || connectMut.isPending}>Connect</Button>
+        </div>
       </DialogContent>
     </Dialog>
   )
 }
 
 export function ArtifactsPanel({ projectId }: { projectId: string }) {
-  const connect = useMutation({
-    mutationFn: async () => apiJson('POST', `/projects/${projectId}/artifacts/connect`, { provider: 'local', visibility: 'private' }),
-    onSuccess: () => toast.success('Artifacts repo connected'),
-    onError: () => toast.error('Failed to connect artifacts repo'),
-  })
+  const qc = useQueryClient()
   const status = useQuery({
     queryKey: ['artifacts-status', projectId],
     queryFn: async () => apiGet<Status>(`/projects/${projectId}/artifacts/status`),
@@ -82,7 +131,7 @@ export function ArtifactsPanel({ projectId }: { projectId: string }) {
             ) : 'Not connected'}
           </div>
           <div className="flex items-center gap-2">
-            <Button onClick={() => connect.mutate()}>Connect repo</Button>
+            <ConnectRepoDialog projectId={projectId} onConnected={() => { qc.invalidateQueries({ queryKey: ['artifacts-status', projectId] }); qc.invalidateQueries({ queryKey: ['artifacts-history', projectId] }) }} />
             <CommitDialog projectId={projectId} />
           </div>
         </div>

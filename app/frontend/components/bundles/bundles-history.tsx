@@ -30,7 +30,23 @@ export function BundlesHistory({ projectId }: { projectId: string }) {
     onError: () => toast.error('Verification failed'),
   })
 
-  const downloadUrl = (id: string) => `${getApiBase()}/bundles/${id}/download?token=${encodeURIComponent(getToken())}`
+  const downloadBundle = async (id: string) => {
+    const base = getApiBase()
+    const res = await fetch(`${base}/bundles/${id}/download`, { headers: { 'X-Token': getToken() } })
+    if (!res.ok) { toast.error('Download failed'); return }
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    const cd = res.headers.get('Content-Disposition') || ''
+    const match = cd.match(/filename="?([^";]+)"?/)
+    const name = match?.[1] || `bundle-${id}.zip`
+    a.href = url
+    a.download = name
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+  }
 
   return (
     <Card>
@@ -50,7 +66,7 @@ export function BundlesHistory({ projectId }: { projectId: string }) {
               </div>
               <div className="flex items-center gap-2">
                 <Button variant="outline" size="sm" onClick={() => verify.mutate(b.id)} disabled={verify.isPending}>Verify</Button>
-                <a href={downloadUrl(b.id)}><Button size="sm" disabled={!b.output_path || b.status !== 'completed'}>Download</Button></a>
+                <Button size="sm" disabled={!b.output_path || b.status !== 'completed'} onClick={() => downloadBundle(b.id)}>Download</Button>
               </div>
             </div>
           ))}
@@ -59,4 +75,3 @@ export function BundlesHistory({ projectId }: { projectId: string }) {
     </Card>
   )
 }
-
