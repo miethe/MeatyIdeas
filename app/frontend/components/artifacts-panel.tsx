@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 type Status = { provider: string, repo_url?: string | null, branch?: string | null, ahead: number, behind: number, last_sync?: string | null }
 type Commit = { sha: string, author?: string | null, message: string, date: string }
 
-function CommitDialog({ projectId }: { projectId: string }) {
+function CommitDialog({ projectId, disabled }: { projectId: string, disabled?: boolean }) {
   const [open, setOpen] = React.useState(false)
   const [paths, setPaths] = React.useState<string>('files')
   const [message, setMessage] = React.useState<string>('chore: update artifacts')
@@ -23,11 +23,12 @@ function CommitDialog({ projectId }: { projectId: string }) {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline">Commit & Push</Button>
+        <Button variant="outline" disabled={disabled}>Commit & Push</Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Commit & Push</DialogTitle>
+          <p className="text-sm text-muted-foreground">Select paths to commit and optionally push to the remote.</p>
         </DialogHeader>
         <div className="space-y-3 text-sm">
           <label className="flex items-center gap-2">
@@ -73,6 +74,7 @@ function ConnectRepoDialog({ projectId, onConnected }: { projectId: string, onCo
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Connect Artifacts Repository</DialogTitle>
+          <p className="text-sm text-muted-foreground">Choose a provider and repo URL (for GitHub, set GITHUB_TOKEN in API env).</p>
         </DialogHeader>
         <div className="space-y-3 text-sm">
           <label className="flex items-center gap-2">
@@ -111,11 +113,13 @@ export function ArtifactsPanel({ projectId }: { projectId: string }) {
     queryFn: async () => apiGet<Status>(`/projects/${projectId}/artifacts/status`),
     enabled: !!projectId,
     refetchInterval: 5000,
+    retry: false,
   })
   const history = useQuery({
     queryKey: ['artifacts-history', projectId],
     queryFn: async () => apiGet<Commit[]>(`/projects/${projectId}/artifacts/history?limit=10`),
     enabled: !!projectId,
+    retry: false,
   })
   return (
     <Card>
@@ -132,7 +136,7 @@ export function ArtifactsPanel({ projectId }: { projectId: string }) {
           </div>
           <div className="flex items-center gap-2">
             <ConnectRepoDialog projectId={projectId} onConnected={() => { qc.invalidateQueries({ queryKey: ['artifacts-status', projectId] }); qc.invalidateQueries({ queryKey: ['artifacts-history', projectId] }) }} />
-            <CommitDialog projectId={projectId} />
+            <CommitDialog projectId={projectId} disabled={!status.data?.branch} />
           </div>
         </div>
         <div className="mt-4">

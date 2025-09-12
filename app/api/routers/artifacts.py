@@ -83,9 +83,10 @@ def artifacts_status(project_id: str, db: Session = Depends(get_db)):
         return ArtifactsStatus(provider=ar.provider if ar else "local", repo_url=ar.repo_url if ar else None, branch=None, ahead=0, behind=0, last_sync=ar.last_synced_at if ar else None)
     try:
         st = repo_status(art_dir, (ar.default_branch if ar else None))
-    except GitError as e:
-        raise HTTPException(status_code=400, detail={"code": e.code, "message": e.message})
-    return ArtifactsStatus(provider=ar.provider if ar else "local", repo_url=ar.repo_url if ar else None, branch=st.get("branch"), ahead=st.get("ahead", 0), behind=st.get("behind", 0), last_sync=ar.last_synced_at if ar else None)
+        return ArtifactsStatus(provider=ar.provider if ar else "local", repo_url=ar.repo_url if ar else None, branch=st.get("branch"), ahead=st.get("ahead", 0), behind=st.get("behind", 0), last_sync=ar.last_synced_at if ar else None)
+    except GitError:
+        # Gracefully degrade: return basic status without ahead/behind
+        return ArtifactsStatus(provider=ar.provider if ar else "local", repo_url=ar.repo_url if ar else None, branch=ar.default_branch if ar else None, ahead=0, behind=0, last_sync=ar.last_synced_at if ar else None)
 
 
 @router.get("/{project_id}/artifacts/history", response_model=list[CommitEntry])
