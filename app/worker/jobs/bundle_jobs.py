@@ -87,6 +87,11 @@ def export(slug: str, project_id: str, project_name: str, file_rel_paths: list[s
                 pr = _try_open_github_pr(remote_url, base_branch, branch_name, project_name, file_rel_paths)
                 if pr and pr.get("html_url"):
                     pr_url = pr["html_url"]
+                    try:
+                        r = redis.from_url(api_settings.redis_url)
+                        r.publish(f"events:{project_id}", json.dumps({"type": "bundle.pr_opened", "project_id": project_id, "payload": {"url": pr_url}}))
+                    except Exception:
+                        pass
             # Event for branch pushed
             try:
                 r = redis.from_url(api_settings.redis_url)

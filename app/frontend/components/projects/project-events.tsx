@@ -24,6 +24,10 @@ export function ProjectEvents({ projectId }: Props) {
             toast.info('Bundle started')
           } else if (type === 'bundle.completed') {
             toast.success('Bundle completed')
+          } else if (type === 'bundle.branch_pushed') {
+            toast.success('Bundle branch pushed')
+          } else if (type === 'bundle.pr_opened') {
+            toast.success('PR opened for bundle')
           } else if (type === 'commit.started') {
             toast.info('Commit started')
           } else if (type === 'commit.completed') {

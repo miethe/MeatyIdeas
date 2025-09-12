@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import FileResponse
 import redis
 import rq
 from sqlalchemy.orm import Session
@@ -59,6 +60,15 @@ def export_project_bundle(project_id: str, body: BundleCreateRequest, db: Sessio
     db.refresh(b)
     # Enqueue background job
     q = rq.Queue("default", connection=redis.from_url(settings.redis_url))
+    # Translate roles keyed by file_id to relative paths for the export function
+    roles_by_rel: dict[str, str] = {}
+    if selection and selection.roles:
+        id_to_rel = {f.id: os.path.join("files", f.path) for f in files}
+        for fid, role in selection.roles.items():
+            rel = id_to_rel.get(fid)
+            if rel:
+                roles_by_rel[rel] = role
+
     job = q.enqueue(
         "worker.jobs.bundle_jobs.export",
         slug=p.slug,
@@ -68,7 +78,7 @@ def export_project_bundle(project_id: str, body: BundleCreateRequest, db: Sessio
         include_checksums=body.include_checksums,
         push_branch=body.push_branch,
         open_pr=body.open_pr,
-        roles=(selection.roles if selection else {}),
+        roles=roles_by_rel,
         bundle_id=b.id,
         job_timeout=600,
     )
@@ -127,3 +137,12 @@ def verify_bundle(bundle_id: str, db: Session = Depends(get_db)):
     except Exception as e:
         raise HTTPException(status_code=400, detail={"code": "INVALID_ZIP", "message": str(e)})
     return {"ok": len(issues) == 0, "issues": issues}
+
+
+@bundles_router.get("/{bundle_id}/download")
+def download_bundle(bundle_id: str, db: Session = Depends(get_db)):
+    b = db.get(Bundle, bundle_id)
+    if not b or not b.output_path or not os.path.exists(b.output_path):
+        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Bundle file"})
+    filename = os.path.basename(b.output_path)
+    return FileResponse(b.output_path, media_type="application/zip", filename=filename)

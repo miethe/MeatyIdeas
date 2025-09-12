@@ -12,7 +12,8 @@ import { FileCreateDialog } from '@/components/files/file-create-dialog'
 import { Button } from '@/components/ui/button'
 import { span } from '@/lib/telemetry'
 import { ArtifactsPanel } from '@/components/artifacts-panel'
-import { ExportBundleDialog } from '@/components/export-bundle-dialog'
+import { ExportBundleWizard } from '@/components/bundles/export-bundle-wizard'
+import { BundlesHistory } from '@/components/bundles/bundles-history'
 import { ProjectEvents } from '@/components/projects/project-events'
 
 export default function ProjectPage() {
@@ -73,15 +74,16 @@ export default function ProjectPage() {
         </div>
         {projectId && (
           <div className="flex items-center gap-2">
-            <ExportBundleDialog projectId={projectId} />
+            <ExportBundleWizard projectId={projectId} />
             <FileCreateDialog projectId={projectId}>
               <Button>New File</Button>
             </FileCreateDialog>
           </div>
         )}
       </div>
-      <div className="mb-6">
+      <div className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
         {projectId && <ArtifactsPanel projectId={projectId} />}
+        {projectId && <BundlesHistory projectId={projectId} />}
       </div>
       {files.isLoading ? (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
