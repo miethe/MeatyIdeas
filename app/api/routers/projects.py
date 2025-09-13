@@ -129,3 +129,54 @@ def list_project_files(project_id: str, db: Session = Depends(get_db)):
     if not p:
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND"})
     return p.files
+
+
+@router.get("/{project_id}/files/tree")
+def get_project_files_tree(project_id: str, db: Session = Depends(get_db)):
+    p = db.get(Project, project_id)
+    if not p:
+        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND"})
+    # Build tree from file paths
+    files = db.scalars(select(File).where(File.project_id == project_id)).all()
+    root: dict = {"name": "", "path": "", "type": "dir", "children": {}}
+    for f in files:
+        parts = [seg for seg in f.path.split("/") if seg]
+        cur = root
+        acc = []
+        for i, seg in enumerate(parts):
+            acc.append(seg)
+            is_last = i == len(parts) - 1
+            if is_last:
+                # file node
+                if "children" not in cur:
+                    cur["children"] = {}
+                cur["children"].setdefault(seg, {
+                    "name": seg,
+                    "path": "/".join(acc),
+                    "type": "file",
+                    "file_id": f.id,
+                    "title": f.title,
+                })
+            else:
+                if "children" not in cur:
+                    cur["children"] = {}
+                if seg not in cur["children"]:
+                    cur["children"][seg] = {"name": seg, "path": "/".join(acc), "type": "dir", "children": {}}
+                cur = cur["children"][seg]
+
+    def to_list(node: dict) -> list:
+        if "children" not in node:
+            return []
+        items = []
+        for name, child in node["children"].items():
+            if child["type"] == "dir":
+                child_out = child.copy()
+                child_out["children"] = to_list(child)
+                items.append(child_out)
+            else:
+                items.append(child)
+        # sort: dirs first by name, then files by name
+        items.sort(key=lambda x: (0 if x["type"] == "dir" else 1, x["name"].lower()))
+        return items
+
+    return to_list(root)

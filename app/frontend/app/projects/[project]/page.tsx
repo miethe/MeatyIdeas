@@ -15,6 +15,7 @@ import { ArtifactsPanel } from '@/components/artifacts-panel'
 import { ExportBundleWizard } from '@/components/bundles/export-bundle-wizard'
 import { BundlesHistory } from '@/components/bundles/bundles-history'
 import { ProjectEvents } from '@/components/projects/project-events'
+import { FileTree } from '@/components/files/file-tree'
 
 export default function ProjectPage() {
   const params = useParams<{ project: string }>()
@@ -85,6 +86,11 @@ export default function ProjectPage() {
         {projectId && <ArtifactsPanel projectId={projectId} />}
         {projectId && <BundlesHistory projectId={projectId} />}
       </div>
+      {projectId && (
+        <div className="mb-6">
+          <FileTree projectId={projectId} onOpenFile={(fid) => setSelected(files.data?.find((x) => x.id === fid) || null)} />
+        </div>
+      )}
       {files.isLoading ? (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
           {Array.from({ length: 9 }).map((_, i) => (

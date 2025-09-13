@@ -111,3 +111,31 @@ class CommitEntry(BaseModel):
     author: str | None
     message: str
     date: dt.datetime
+
+
+# M1 — Editor & Links Polish
+class LinkInfo(BaseModel):
+    target_title: str
+    target_file_id: str | None = None
+    resolved: bool
+
+
+class MoveFileRequest(BaseModel):
+    new_path: str | None = None
+    new_title: str | None = None
+    update_links: bool = True
+    dry_run: bool = False
+
+
+class MoveFileDryRunResult(BaseModel):
+    will_move: bool
+    old_path: str
+    new_path: str | None = None
+    title_change: dict[str, str] | None = None
+    files_to_rewrite: list[dict[str, str]] = Field(default_factory=list)
+    rewrite_count: int = 0
+    applied: bool = False
+
+
+class MoveFileApplyResult(MoveFileDryRunResult):
+    file: FileRead | None = None

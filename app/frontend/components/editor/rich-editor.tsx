@@ -25,6 +25,7 @@ export function RichEditor({ projectId, fileId }: Props) {
   const [content, setContent] = useState('')
   const [html, setHtml] = useState('')
   const [backlinks, setBacklinks] = useState<FileItem[]>([])
+  const [outLinks, setOutLinks] = useState<{ target_title: string; target_file_id?: string | null; resolved: boolean }[]>([])
   const [rewrite, setRewrite] = useState(true)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -46,6 +47,10 @@ export function RichEditor({ projectId, fileId }: Props) {
       try {
         const bl = await apiGet<any[]>(`/files/${fi.id}/backlinks`)
         setBacklinks(bl.map((b) => FileSchema.parse(b)))
+      } catch {}
+      try {
+        const ol = await apiGet<any[]>(`/files/${fi.id}/links`)
+        setOutLinks(ol as any)
       } catch {}
     }
     load()
@@ -84,6 +89,9 @@ export function RichEditor({ projectId, fileId }: Props) {
         }).then(() => {
           toast.success('Saved')
           setLastSaved({ title, path, content })
+          // refresh links/backlinks
+          apiGet<any[]>(`/files/${file.id}/backlinks`).then((bl) => setBacklinks(bl.map((b) => FileSchema.parse(b)))).catch(() => {})
+          apiGet<any[]>(`/files/${file.id}/links`).then((ol) => setOutLinks(ol as any)).catch(() => {})
         })
       }
       if (isMeta && e.key.toLowerCase() === 'n') {
@@ -308,6 +316,51 @@ export function RichEditor({ projectId, fileId }: Props) {
         <div className="prose prose-invert max-w-none" dangerouslySetInnerHTML={{ __html: html }} />
         {file && (
           <div className="mt-6 border-t pt-3">
+            <div className="mb-1 text-sm font-semibold">Outgoing Links</div>
+            {outLinks.length === 0 ? (
+              <div className="text-sm text-muted-foreground">No links.</div>
+            ) : (
+              <ul className="text-sm">
+                {outLinks.map((l, idx) => (
+                  <li key={idx} className="flex items-center justify-between">
+                    <span>
+                      {l.resolved ? (
+                        <span className="text-emerald-400">●</span>
+                      ) : (
+                        <span className="text-yellow-400">●</span>
+                      )}{' '}
+                      {l.target_title}
+                    </span>
+                    {!l.resolved && (
+                      <button
+                        className="text-xs underline-offset-2 hover:underline"
+                        onClick={async () => {
+                          try {
+                            await apiJson('POST', `/files/project/${projectId}`, {
+                              title: l.target_title,
+                              path: `${l.target_title.toLowerCase().replace(/\s+/g, '-')}.md`,
+                              content_md: `# ${l.target_title}`,
+                              front_matter: {},
+                            })
+                            toast.success('Created file for link')
+                            const ol = await apiGet<any[]>(`/files/${file!.id}/links`)
+                            setOutLinks(ol as any)
+                          } catch {
+                            toast.error('Create failed')
+                          }
+                        }}
+                      >
+                        Create
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+        {file && (
+          <div className="mt-6 border-t pt-3">
             <div className="mb-1 text-sm font-semibold">Backlinks</div>
             {backlinks.length === 0 ? (
               <div className="text-sm text-muted-foreground">No backlinks yet.</div>
@@ -315,7 +368,7 @@ export function RichEditor({ projectId, fileId }: Props) {
               <ul className="text-sm">
                 {backlinks.map((b) => (
                   <li key={b.id}>
-                    <a className="hover:underline" href={`#`} onClick={(e) => { e.preventDefault(); alert(`Open ${b.title}`) }}>{b.title}</a>
+                    <a className="hover:underline" href={`/projects/${projectId}/edit/${b.id}`}>{b.title}</a>
                   </li>
                 ))}
               </ul>
