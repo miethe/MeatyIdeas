@@ -17,10 +17,13 @@ This document maps PRD requirements to implementation and tests.
   - Impl: `app/api/routers/files.py`
   - Test: add API tests (pending)
 
-- Search (FTS + snippets)
-  - Requirement: PRD Epic B
-  - Impl: `app/api/routers/search.py` (to be enhanced with snippets/filters)
-  - Test: add API tests (pending)
+- Search 2.0 (FTS + snippets + filters + saved)
+  - Requirement: PRD Epic B — Search 2.0
+  - Impl: `app/api/routers/search.py` (enhanced), `app/api/search.py` (indexer), `app/worker/jobs/search_jobs.py` (reindex job), `app/api/models.py:SavedSearch`
+  - FE: `app/frontend/components/search-command.tsx` (typed filters, snippets, saved)
+  - CLI: `app/cli/__main__.py` (filters, saved subcommands)
+  - Tests: `app/api/tests/test_search.py`, `app/api/tests/test_search_advanced.py`
+  - Docs: `docs/user/searching.md`, `docs/architecture/search.md`
 
 - Bundles export
   - Requirement: PRD 5/Bundles; Epic C
@@ -41,4 +44,3 @@ This document maps PRD requirements to implementation and tests.
   - Requirement: PRD 5/CLI
   - Impl: `app/cli/__main__.py`
   - Test: CLI smoke (pending)
-

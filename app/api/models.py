@@ -111,3 +111,14 @@ class Link(Base):
     target_title: Mapped[str] = mapped_column(String, nullable=False)
     target_file_id: Mapped[str | None] = mapped_column(String, ForeignKey("files.id"), nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
+class SavedSearch(Base):
+    __tablename__ = "saved_searches"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    owner: Mapped[str | None] = mapped_column(String, nullable=True, default="default")
+    query: Mapped[str] = mapped_column(String, default="")
+    filters: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now_utc)

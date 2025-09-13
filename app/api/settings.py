@@ -12,6 +12,8 @@ class Settings(BaseSettings):
     otel_service_name: str = "meatyprojects-api"
     seed_demo: int = 1
     github_token: str | None = None
+    semantic_search: int = 0
+    search_max_limit: int = 50
 
     class Config:
         env_file = ".env"

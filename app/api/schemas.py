@@ -139,3 +139,22 @@ class MoveFileDryRunResult(BaseModel):
 
 class MoveFileApplyResult(MoveFileDryRunResult):
     file: FileRead | None = None
+
+
+# Search 2.0 — Saved Searches
+class SavedSearchCreate(BaseModel):
+    name: str
+    query: str = ""
+    filters: dict[str, Any] = Field(default_factory=dict)
+
+
+class SavedSearchRead(BaseModel):
+    id: str
+    name: str
+    owner: str | None
+    query: str
+    filters: dict[str, Any]
+    created_at: dt.datetime
+
+    class Config:
+        from_attributes = True

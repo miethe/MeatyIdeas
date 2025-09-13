@@ -65,7 +65,7 @@ def create_file(project_id: str, body: FileCreate, db: Session = Depends(get_db)
         fh.write(body.content_md)
     # index
     with engine.begin() as conn:
-        index_file(conn, f.id, f"{f.title}\n{f.content_md}")
+        index_file(conn, f.id, f"{f.title}\n{f.content_md}", title=f.title, path=f.path)
     # links
     upsert_links(db, project_id, f, body.content_md)
     return f
@@ -112,7 +112,7 @@ def update_file(file_id: str, body: FileCreate, db: Session = Depends(get_db)):
             pass
     # index
     with engine.begin() as conn:
-        index_file(conn, f.id, f"{f.title}\n{f.content_md}")
+        index_file(conn, f.id, f"{f.title}\n{f.content_md}", title=f.title, path=f.path)
     # links
     upsert_links(db, f.project_id, f, body.content_md)
     # rewrite links if title changed
@@ -225,7 +225,7 @@ def move_file(file_id: str, body: MoveFileRequest, db: Session = Depends(get_db)
             db.commit()
             db.refresh(rf)
             with engine.begin() as conn:
-                index_file(conn, rf.id, f"{rf.title}\n{rf.content_md}")
+                index_file(conn, rf.id, f"{rf.title}\n{rf.content_md}", title=rf.title, path=rf.path)
             upsert_links(db, rf.project_id, rf, rf.content_md)
 
     if will_move:

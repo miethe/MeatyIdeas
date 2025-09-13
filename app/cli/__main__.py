@@ -53,12 +53,61 @@ def add(project: str = typer.Option(..., help="Project slug"), path: str = typer
 
 
 @app.command()
-def search(q: str):
+def search(
+    q: str,
+    project: Optional[str] = typer.Option(None, help="Project slug filter"),
+    tag: list[str] = typer.Option(None, help="Tag filter (repeatable)"),
+    status: Optional[str] = typer.Option(None, help="Status filter"),
+    sort: str = typer.Option("score", help="Sort: score|updated"),
+    limit: int = typer.Option(20, help="Limit"),
+    offset: int = typer.Option(0, help="Offset"),
+):
     cfg, s = client()
-    r = s.get(f"{cfg.api_base}/search", params={"q": q})
+    params: dict[str, str | int] = {"q": q, "limit": limit, "offset": offset, "sort": ("updated_at" if sort == "updated" else "score")}
+    if project:
+        p = find_project_by_slug(s, cfg.api_base, project)
+        if not p:
+            typer.echo("Project not found", err=True)
+            raise typer.Exit(code=1)
+        params["project_id"] = p["id"]
+    if status:
+        params["status"] = status
+    r = s.get(f"{cfg.api_base}/search", params=params, data=None)
     r.raise_for_status()
     for item in r.json():
-        typer.echo(item["file_id"]) 
+        typer.echo(f"{item['file_id']}\t{item['title']}\t{item['path']}")
+
+
+saved = typer.Typer(help="Saved searches")
+app.add_typer(saved, name="search-saved")
+
+
+@saved.command("list")
+def saved_list():
+    cfg, s = client()
+    r = s.get(f"{cfg.api_base}/search/saved")
+    r.raise_for_status()
+    for it in r.json():
+        typer.echo(f"{it['id']}\t{it['name']}")
+
+
+@saved.command("create")
+def saved_create(name: str, query: str = typer.Option(""), tag: list[str] = typer.Option(None), status: Optional[str] = None, sort: str = typer.Option("score")):
+    cfg, s = client()
+    filters = {"tag": tag or [], "status": status, "sort": ("updated_at" if sort == "updated" else "score")}
+    r = s.post(f"{cfg.api_base}/search/saved", data=json.dumps({"name": name, "query": query, "filters": filters}))
+    r.raise_for_status()
+    typer.echo(r.json()["id"]) 
+
+
+@saved.command("delete")
+def saved_delete(id: str):
+    cfg, s = client()
+    r = s.delete(f"{cfg.api_base}/search/saved/{id}")
+    if r.status_code not in (200, 204):
+        typer.echo("delete failed", err=True)
+        raise typer.Exit(code=1)
+    typer.echo("deleted")
 
 
 @app.command()
