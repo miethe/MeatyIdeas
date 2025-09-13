@@ -16,3 +16,18 @@ def test_search_snippet_and_filters():
     if rows:
         it = rows[0]
         assert "file_id" in it and "title" in it and "path" in it
+
+def test_search_invalid_query_leading_slash():
+    ensure_seed()
+    c = TestClient(app)
+    r = c.get("/api/search", params={"q": "/tag:demo"}, headers={"X-Token": "devtoken"})
+    assert r.status_code == 400
+    detail = r.json().get("detail")
+    assert detail["code"] == "BAD_QUERY"
+    assert "cannot start with '/'" in detail["message"]
+    assert r.status_code == 200
+    rows = r.json()
+    assert isinstance(rows, list)
+    if rows:
+        it = rows[0]
+        assert "file_id" in it and "title" in it and "path" in it

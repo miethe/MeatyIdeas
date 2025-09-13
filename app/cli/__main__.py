@@ -72,7 +72,14 @@ def search(
         params["project_id"] = p["id"]
     if status:
         params["status"] = status
-    r = s.get(f"{cfg.api_base}/search", params=params, data=None)
+    # Repeatable tag params
+    if tag:
+        # requests can handle tuples for repeated params
+        # Build a list of tuples
+        items = list(params.items()) + [("tag", t) for t in tag]
+        r = s.get(f"{cfg.api_base}/search", params=items, data=None)
+    else:
+        r = s.get(f"{cfg.api_base}/search", params=params, data=None)
     r.raise_for_status()
     for item in r.json():
         typer.echo(f"{item['file_id']}\t{item['title']}\t{item['path']}")

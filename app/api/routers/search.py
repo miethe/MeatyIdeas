@@ -29,10 +29,20 @@ def _fts_columns(conn: Connection) -> list[str]:
     return [r[1] for r in rows]
 
 
+# Detect JSON1 availability for tag filters/facets
+try:
+    with engine.connect() as _c:
+        _c.exec_driver_sql("select json('null')")
+    HAS_JSON1 = True
+except Exception:
+    HAS_JSON1 = False
+
+
 @router.get("")
 def search(
     q: str,
     project_id: str | None = None,
+    project_slug: str | None = None,
     tag: list[str] | None = None,
     status: str | None = None,
     sort: str = "score",
@@ -44,6 +54,10 @@ def search(
     limit = max(1, min(limit, settings.search_max_limit))
     if sort not in ("score", "updated_at"):
         raise HTTPException(status_code=400, detail={"code": "BAD_SORT", "message": "Invalid sort"})
+
+    # Input validation: reject queries starting with '/' (invalid for FTS5)
+    if q and q.startswith("/"):
+        raise HTTPException(status_code=400, detail={"code": "BAD_QUERY", "message": "Search query cannot start with '/'"})
 
     sql_tmpl = (
         """
@@ -71,19 +85,25 @@ def search(
     if project_id:
         and_project = " AND p.id = :project_id"
         params["project_id"] = project_id
+    if project_slug:
+        and_project = " AND p.slug = :project_slug"
+        params["project_slug"] = project_slug
     if status:
         and_status = " AND p.status = :status"
         params["status"] = status
     if tag:
-        # Prefer JSON1 exact match; allow multiple tags (AND semantics across values)
         clauses = []
         for i, t in enumerate(tag):
             key = f"tag{i}"
             params[key] = t
-            clauses.append(
-                " EXISTS (SELECT 1 FROM json_each(f.tags) je WHERE je.value = :" + key + ") "
-            )
-        and_tag = " AND " + " AND ".join(clauses)
+            if HAS_JSON1:
+                clauses.append(
+                    " EXISTS (SELECT 1 FROM json_each(f.tags) je WHERE je.value = :" + key + ") "
+                )
+            else:
+                params[key + "_like"] = f"%\"{t}\"%"
+                clauses.append(" f.tags LIKE :" + key + "_like ")
+        and_tag = (" AND " + " AND ".join(clauses)) if clauses else ""
 
     order_by = " ORDER BY score ASC, f.updated_at DESC " if sort == "score" else " ORDER BY f.updated_at DESC "
 
@@ -113,13 +133,16 @@ def search(
             st_rows = conn.execute(text(f"SELECT status, COUNT(1) as c FROM ({facet_base}) GROUP BY status"), params).all()
             facets_out["status"] = [{"name": r[0], "count": r[1]} for r in st_rows]
             # Tags facet
-            tag_rows = conn.execute(
-                text(
-                    "SELECT je.value as tag, COUNT(1) as c FROM (" + facet_base + ") x, json_each((SELECT tags FROM files WHERE id = x.fid)) je GROUP BY je.value"
-                ),
-                params,
-            ).all()
-            facets_out["tags"] = [{"name": r[0], "count": r[1]} for r in tag_rows]
+            if HAS_JSON1:
+                tag_rows = conn.execute(
+                    text(
+                        "SELECT je.value as tag, COUNT(1) as c FROM (" + facet_base + ") x, json_each((SELECT tags FROM files WHERE id = x.fid)) je GROUP BY je.value"
+                    ),
+                    params,
+                ).all()
+                facets_out["tags"] = [{"name": r[0], "count": r[1]} for r in tag_rows]
+            else:
+                facets_out["tags"] = []
 
     out = [dict(r) for r in rows]
     if int(facets or 0) == 1:

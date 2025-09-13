@@ -9,6 +9,7 @@ Basics
 
 Typed Filters
 
+- `project:<slug>`: filter by project.
 - `tag:<name>`: filter by tag. Repeat for multiple tags.
 - `status:<idea|discovery|draft|live>`: filter by project status.
 - `sort:updated`: sort by last update time (default is rank).
@@ -31,4 +32,3 @@ Admin Rebuild (advanced)
 
 - If the index falls out of sync, an admin can rebuild it: `POST /api/search/index/rebuild`.
 - The rebuild runs in the background as a job; check via `GET /api/jobs/{id}` or the Jobs watcher in the CLI.
-

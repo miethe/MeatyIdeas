@@ -18,7 +18,7 @@ Indexing
 
 Query
 
-- Endpoint: `GET /api/search` with `q`, `tag` (repeatable), `status`, `project_id`, `sort`, `limit`, `offset`.
+- Endpoint: `GET /api/search` with `q`, `tag` (repeatable), `status`, `project_id` or `project_slug`, `sort`, `limit`, `offset`.
 - Ranks using `bm25(search_index)`; default sort by score + recency, optional sort by `updated_at` only.
 - Snippets via `snippet(search_index, col_ix, '[', ']', '...', 8)` using `body` when available, else legacy column.
 - Facets are computed server‑side when needed via JSON1:
@@ -41,4 +41,3 @@ Key Files
 - Job: `app/worker/jobs/search_jobs.py`
 - Model: `app/api/models.py:SavedSearch`
 - FE: `app/frontend/components/search-command.tsx`
-

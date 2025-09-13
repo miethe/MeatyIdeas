@@ -28,26 +28,29 @@ export function CommandPalette({ children }: Props) {
     const parts = input.split(/\s+/)
     const free: string[] = []
     const t: string[] = []
+    let pr: string | undefined
     let st: string | undefined
     let so: 'score' | 'updated_at' = 'score'
     for (const p of parts) {
       if (p.startsWith('tag:')) t.push(p.slice(4))
+      else if (p.startsWith('project:')) pr = p.slice(8)
       else if (p.startsWith('status:')) st = p.slice(7)
       else if (p.startsWith('sort:')) {
         const v = p.slice(5)
         if (v === 'updated') so = 'updated_at'
       } else if (p.trim()) free.push(p)
     }
-    return { q: free.join(' ').trim(), tags: t, status: st, sort: so }
+    return { q: free.join(' ').trim(), tags: t, status: st, sort: so, project_slug: pr }
   }
 
   const parsed = React.useMemo(() => parseFilters(q), [q])
 
-  const { data, isFetching } = useQuery({
-    queryKey: ['search', parsed.q, parsed.tags, parsed.status, parsed.sort],
+  const { data, isFetching, error } = useQuery({
+    queryKey: ['search', parsed.q, parsed.tags, parsed.status, parsed.sort, parsed.project_slug],
     queryFn: async () => {
-      if (!parsed.q || parsed.q.length < 2) return [] as any[]
+      if (!parsed.q || parsed.q.length < 1) return [] as any[]
       const usp = new URLSearchParams({ q: parsed.q, limit: '10', sort: parsed.sort })
+      if (parsed.project_slug) usp.append('project_slug', parsed.project_slug)
       for (const t of parsed.tags) usp.append('tag', t)
       if (parsed.status) usp.append('status', parsed.status)
       const rows = await apiGet<any[]>(`/search?${usp.toString()}`)
@@ -73,7 +76,7 @@ export function CommandPalette({ children }: Props) {
   }
 
   async function onSaveCurrent() {
-    const body = { name: parsed.q || 'Search', query: parsed.q, filters: { tag: parsed.tags, status: parsed.status, sort: parsed.sort } }
+    const body = { name: parsed.q || 'Search', query: parsed.q, filters: { tag: parsed.tags, status: parsed.status, sort: parsed.sort, project_slug: parsed.project_slug } }
     try {
       await apiJson('POST', '/search/saved', body)
       const items = await apiGet<any[]>(`/search/saved`)
@@ -91,22 +94,24 @@ export function CommandPalette({ children }: Props) {
           <Command>
             <CommandInput placeholder="Search projects and files..." value={q} onValueChange={setQ} />
             <CommandList>
-              <CommandEmpty>{isFetching ? 'Loading...' : 'No results'}</CommandEmpty>
+              <CommandEmpty>{isFetching ? 'Loading...' : error ? 'Search error' : 'No results'}</CommandEmpty>
               {/* Saved searches */}
-              {saved && saved.length > 0 && (
-                <CommandGroup heading="Saved Searches">
-                  {saved.map((s) => (
+              <CommandGroup heading="Saved Searches">
+                {saved && saved.length > 0 ? (
+                  saved.map((s) => (
                     <CommandItem key={s.id} value={`saved ${s.name}`} onSelect={() => {
                       const f = s.filters || {}
-                      const qparts = [s.query, ...(f.tag || []).map((x: string) => `tag:${x}`), f.status ? `status:${f.status}` : '', f.sort && f.sort !== 'score' ? 'sort:updated' : ''].filter(Boolean)
+                      const qparts = [s.query, ...(f.tag || []).map((x: string) => `tag:${x}`), f.status ? `status:${f.status}` : '', f.sort && f.sort !== 'score' ? 'sort:updated' : '', f.project_slug ? `project:${f.project_slug}` : ''].filter(Boolean)
                       setQ(qparts.join(' '))
                     }}>
                       {s.name}
                     </CommandItem>
-                  ))}
-                  <CommandItem value="save current" onSelect={onSaveCurrent}>Save current search…</CommandItem>
-                </CommandGroup>
-              )}
+                  ))
+                ) : (
+                  <div className="px-3 py-2 text-xs text-muted-foreground">No saved searches yet.</div>
+                )}
+                <CommandItem value="save current" onSelect={onSaveCurrent}>Save current search…</CommandItem>
+              </CommandGroup>
               <CommandGroup heading="Actions">
                 <CommandItem value="new project" onSelect={() => onSelect({ type: 'action', id: 'new-project' })}>
                   New Project
