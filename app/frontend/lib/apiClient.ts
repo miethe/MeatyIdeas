@@ -17,6 +17,12 @@ export function getApiBase() {
 }
 
 export function getToken() {
+  try {
+    if (typeof window !== 'undefined') {
+      const t = window.localStorage.getItem('token')
+      if (t) return t
+    }
+  } catch {}
   return process.env.NEXT_PUBLIC_TOKEN || 'devtoken'
 }
 

@@ -158,3 +158,32 @@ class SavedSearchRead(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# Phase 1 — Profile
+class UserRead(BaseModel):
+    id: str
+    name: str
+    email: str
+    avatar_url: str | None = None
+    preferences: dict[str, Any] = Field(default_factory=dict)
+    created_at: dt.datetime
+    updated_at: dt.datetime
+
+    class Config:
+        from_attributes = True
+
+
+class UserUpdate(BaseModel):
+    name: str | None = None
+    email: str | None = None
+    avatar_url: str | None = None
+    preferences: dict[str, Any] | None = None
+
+
+class AppConfig(BaseModel):
+    GIT_INTEGRATION: int = 0
+    SHARE_LINKS: int = 0
+    GROUPS_UI: int = 0
+    DIRS_PERSIST: int = 0
+    RESULTS_MODAL: int = 1

@@ -10,6 +10,9 @@ from .db import Base, engine, init_db
 from .app_logging import setup_logging
 from .models import *  # noqa
 from .routers import projects, files, search, artifacts, bundles
+from .routers import profile as profile_router
+from .routers import config as config_router
+from .routers import tags as tags_router
 from .routers import events as events_router
 from .routers import jobs as jobs_router
 from .routers import attachments as attachments_router
@@ -48,6 +51,15 @@ def on_startup() -> None:
         from .seed import ensure_seed
 
         ensure_seed()
+    # Ensure local user exists
+    from .db import SessionLocal as _SessionLocal
+    from .models import User as _User
+
+    with _SessionLocal() as _db:
+        u = _db.get(_User, "local")
+        if not u:
+            _db.add(_User(id="local", name="Local User", email="", avatar_url=None, preferences={}))
+            _db.commit()
 
 
 @app.get("/api/healthz")
@@ -68,3 +80,6 @@ app.include_router(events_router.router, prefix="/api")
 app.include_router(jobs_router.router, prefix="/api", dependencies=auth)
 app.include_router(attachments_router.router, prefix="/api", dependencies=auth)
 app.include_router(render_router.router, prefix="/api", dependencies=auth)
+app.include_router(profile_router.router, prefix="/api", dependencies=auth)
+app.include_router(config_router.router, prefix="/api")
+app.include_router(tags_router.router, prefix="/api", dependencies=auth)

@@ -45,6 +45,10 @@ def search(
     project_slug: str | None = None,
     tag: list[str] | None = None,
     status: str | None = None,
+    type: list[str] | None = None,
+    path_prefix: str | None = None,
+    updated_from: str | None = None,
+    updated_to: str | None = None,
     sort: str = "score",
     limit: int = 20,
     offset: int = 0,
@@ -74,6 +78,9 @@ def search(
         {and_project}
         {and_status}
         {and_tag}
+        {and_type}
+        {and_path}
+        {and_updated}
         {order_by}
         LIMIT :limit OFFSET :offset
         """
@@ -81,6 +88,9 @@ def search(
     and_project = ""
     and_status = ""
     and_tag = ""
+    and_type = ""
+    and_path = ""
+    and_updated = ""
     params: dict[str, Any] = {"q": q, "limit": limit, "offset": offset}
     if project_id:
         and_project = " AND p.id = :project_id"
@@ -105,6 +115,32 @@ def search(
                 clauses.append(" f.tags LIKE :" + key + "_like ")
         and_tag = (" AND " + " AND ".join(clauses)) if clauses else ""
 
+    if type:
+        tclauses = []
+        for i, ext in enumerate(type):
+            key = f"ext{i}"
+            # normalize ext: allow with or without leading dot
+            v = ext.lower().lstrip('.')
+            params[key] = f"%.{v}"
+            tclauses.append(" f.path LIKE :" + key)
+        and_type = (" AND (" + " OR ".join(tclauses) + ")") if tclauses else ""
+
+    if path_prefix:
+        params["path_prefix_like"] = f"{path_prefix}%"
+        and_path = " AND f.path LIKE :path_prefix_like"
+
+    if updated_from or updated_to:
+        if updated_from:
+            params["updated_from"] = updated_from
+        if updated_to:
+            params["updated_to"] = updated_to
+        parts = []
+        if updated_from:
+            parts.append(" f.updated_at >= :updated_from ")
+        if updated_to:
+            parts.append(" f.updated_at <= :updated_to ")
+        and_updated = " AND " + " AND ".join(parts)
+
     order_by = " ORDER BY score ASC, f.updated_at DESC " if sort == "score" else " ORDER BY f.updated_at DESC "
 
     with engine.begin() as conn:
@@ -117,6 +153,9 @@ def search(
             and_tag=and_tag,
             order_by=order_by,
             snippet_col=snippet_col,
+            and_type=and_type,
+            and_path=and_path,
+            and_updated=and_updated,
         )
         rows = conn.execute(text(sql), params).mappings().all()
 

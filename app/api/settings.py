@@ -14,6 +14,12 @@ class Settings(BaseSettings):
     github_token: str | None = None
     semantic_search: int = 0
     search_max_limit: int = 50
+    # Feature flags
+    git_integration: int = 0
+    share_links: int = 0
+    groups_ui: int = 0
+    dirs_persist: int = 0
+    results_modal: int = 1
 
     class Config:
         env_file = ".env"

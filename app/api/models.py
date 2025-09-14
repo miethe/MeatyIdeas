@@ -46,6 +46,20 @@ class Project(Base):
     artifacts: Mapped[list["ArtifactRepo"]] = relationship("ArtifactRepo", back_populates="project")
 
 
+class User(Base):
+    __tablename__ = "user"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default="local")
+    name: Mapped[str] = mapped_column(String, default="Local User")
+    email: Mapped[str] = mapped_column(String, default="")
+    avatar_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    preferences: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    updated_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), default=now_utc, onupdate=now_utc
+    )
+
+
 class File(Base):
     __tablename__ = "files"
 
