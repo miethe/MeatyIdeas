@@ -12,6 +12,7 @@ import { FileCreateDialog } from '@/components/files/file-create-dialog'
 import { Button } from '@/components/ui/button'
 import { span } from '@/lib/telemetry'
 import { ArtifactsPanel } from '@/components/artifacts-panel'
+import { ReposPanel } from '@/components/repos/repos-panel'
 import { ExportBundleWizard } from '@/components/bundles/export-bundle-wizard'
 import { BundlesHistory } from '@/components/bundles/bundles-history'
 import { ProjectEvents } from '@/components/projects/project-events'
@@ -24,6 +25,7 @@ export default function ProjectPage() {
   const projectParam = params.project
   const [projectId, setProjectId] = useState<string | null>(null)
   const [selected, setSelected] = useState<FileItem | null>(null)
+  const [gitEnabled, setGitEnabled] = useState(false)
 
   const projList = useQuery({
     queryKey: ['projects'],
@@ -65,6 +67,10 @@ export default function ProjectPage() {
     if (projectId) span('ui.click.project', { id: projectId })
   }, [projectId])
 
+  useEffect(() => {
+    import('@/lib/config').then(({ getConfig }) => getConfig().then((cfg) => setGitEnabled((cfg.GIT_INTEGRATION || 0) === 1)))
+  }, [])
+
   return (
     <AppShell>
       {projectId && <ProjectEvents projectId={projectId} />}
@@ -83,7 +89,7 @@ export default function ProjectPage() {
         )}
       </div>
       <div className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
-        {projectId && <ArtifactsPanel projectId={projectId} />}
+        {projectId && gitEnabled ? <ReposPanel projectId={projectId} /> : projectId && <ArtifactsPanel projectId={projectId} />}
         {projectId && <BundlesHistory projectId={projectId} />}
       </div>
       {projectId && (

@@ -10,6 +10,7 @@ from .db import Base, engine, init_db
 from .app_logging import setup_logging
 from .models import *  # noqa
 from .routers import projects, files, search, artifacts, bundles
+from .routers import repos as repos_router
 from .routers import profile as profile_router
 from .routers import config as config_router
 from .routers import tags as tags_router
@@ -76,6 +77,7 @@ app.include_router(search.router, prefix="/api", dependencies=auth)
 app.include_router(artifacts.router, prefix="/api", dependencies=auth)
 app.include_router(bundles.router, prefix="/api", dependencies=auth)
 app.include_router(bundles.bundles_router, prefix="/api", dependencies=auth)
+app.include_router(repos_router.router, prefix="/api", dependencies=auth)
 app.include_router(events_router.router, prefix="/api")
 app.include_router(jobs_router.router, prefix="/api", dependencies=auth)
 app.include_router(attachments_router.router, prefix="/api", dependencies=auth)

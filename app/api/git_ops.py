@@ -99,3 +99,61 @@ def repo_history(path: str, limit: int = 20) -> list[dict]:
             "date": c.committed_datetime,
         })
     return out
+
+
+def list_branches(path: str) -> list[dict]:
+    repo = Repo(path)
+    current = None
+    try:
+        current = repo.active_branch.name
+    except Exception:
+        current = None
+    out: list[dict] = []
+    for b in repo.branches:
+        out.append({"name": b.name, "is_current": (b.name == current)})
+    return out
+
+
+def create_branch(path: str, name: str, checkout: bool = True) -> None:
+    repo = Repo(path)
+    try:
+        new_b = repo.create_head(name)
+        if checkout:
+            new_b.checkout()
+    except GitCommandError as e:
+        raise GitError("GIT_BRANCH_FAIL", str(e))
+
+
+def checkout_branch(path: str, name: str) -> None:
+    repo = Repo(path)
+    try:
+        repo.git.checkout(name)
+    except GitCommandError as e:
+        raise GitError("GIT_CHECKOUT_FAIL", str(e))
+
+
+def pull(path: str) -> dict:
+    repo = Repo(path)
+    try:
+        if not repo.remotes:
+            raise GitError("GIT_PULL_FAIL", "No remote configured")
+        info = repo.remotes.origin.pull()
+        return {"updated": True, "info": [str(i) for i in info]}
+    except GitCommandError as e:
+        raise GitError("GIT_PULL_FAIL", str(e))
+
+
+def push(path: str) -> dict:
+    repo = Repo(path)
+    try:
+        if not repo.remotes:
+            raise GitError("GIT_PUSH_FAIL", "No remote configured")
+        info = repo.remotes.origin.push()
+        return {"pushed": True, "info": [str(i) for i in info]}
+    except GitCommandError as e:
+        raise GitError("GIT_PUSH_FAIL", str(e))
+
+
+def is_dirty(path: str) -> bool:
+    repo = Repo(path)
+    return repo.is_dirty(untracked_files=True)

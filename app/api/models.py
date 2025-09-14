@@ -21,6 +21,7 @@ from .db import Base
 StatusEnum = ("idea", "discovery", "draft", "live")
 VisibilityEnum = ("public", "private")
 ProviderEnum = ("github", "gitlab", "bitbucket", "local")
+ScopeEnum = ("project", "global")
 
 
 def now_utc() -> dt.datetime:
@@ -44,6 +45,7 @@ class Project(Base):
 
     files: Mapped[list["File"]] = relationship("File", back_populates="project")
     artifacts: Mapped[list["ArtifactRepo"]] = relationship("ArtifactRepo", back_populates="project")
+    repos: Mapped[list["Repo"]] = relationship("Repo", back_populates="project")
 
 
 class User(Base):
@@ -88,6 +90,22 @@ class ArtifactRepo(Base):
     last_synced_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     project: Mapped[Project] = relationship("Project", back_populates="artifacts")
+
+
+class Repo(Base):
+    __tablename__ = "repos"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    scope: Mapped[str] = mapped_column(Enum(*ScopeEnum, name="scope_enum"), default="project")
+    project_id: Mapped[str | None] = mapped_column(String, ForeignKey("projects.id"), nullable=True)
+    provider: Mapped[str] = mapped_column(Enum(*ProviderEnum, name="provider_enum"), default="local")
+    repo_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    default_branch: Mapped[str] = mapped_column(String, default="main")
+    visibility: Mapped[str] = mapped_column(Enum(*VisibilityEnum, name="visibility_enum"), default="private")
+    last_synced_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    project: Mapped[Project | None] = relationship("Project", back_populates="repos")
 
 
 class Bundle(Base):

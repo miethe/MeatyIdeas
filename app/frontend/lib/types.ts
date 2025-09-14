@@ -36,3 +36,24 @@ export const SearchResultSchema = z.object({
 })
 export type SearchResult = z.infer<typeof SearchResultSchema>
 
+// Git Repos (Phase 2)
+export const RepoSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  scope: z.string(),
+  project_id: z.string().nullable().optional(),
+  provider: z.string(),
+  repo_url: z.string().nullable().optional(),
+  default_branch: z.string(),
+  visibility: z.string(),
+  last_synced_at: z.string().nullable().optional(),
+})
+export type RepoItem = z.infer<typeof RepoSchema>
+
+export const RepoStatusSchema = z.object({
+  branch: z.string().nullable(),
+  ahead: z.number(),
+  behind: z.number(),
+  dirty: z.boolean(),
+})
+export type RepoStatus = z.infer<typeof RepoStatusSchema>

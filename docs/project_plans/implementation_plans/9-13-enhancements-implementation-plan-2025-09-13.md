@@ -196,6 +196,8 @@ Checklist commands
 
 ## 6) Phase 2 — Multi-Repo Git Panel
 
+Reference: See detailed phase plan in `docs/project_plans/implementation_plans/ph2-multi-repo-git-impl.md` for file-by-file tasks, API specs, and acceptance.
+
 Database Layer
 - Task: Repo table (supersede ArtifactRepo)
   - Description: New `repos` table: id, name, scope (project|global), project_id?, provider, repo_url?, default_branch, visibility, last_synced_at.

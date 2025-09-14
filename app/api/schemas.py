@@ -187,3 +187,41 @@ class AppConfig(BaseModel):
     GROUPS_UI: int = 0
     DIRS_PERSIST: int = 0
     RESULTS_MODAL: int = 1
+
+
+# Phase 2 — Repos (Git)
+class RepoCreate(BaseModel):
+    scope: str = "project"  # project | global
+    project_id: str | None = None
+    provider: str = "local"
+    name: str = "repo"
+    repo_url: str | None = None
+    visibility: str = "private"
+    default_branch: str | None = None
+
+
+class RepoOut(BaseModel):
+    id: str
+    name: str
+    scope: str
+    project_id: str | None
+    provider: str
+    repo_url: str | None
+    default_branch: str
+    visibility: str
+    last_synced_at: dt.datetime | None
+
+    class Config:
+        from_attributes = True
+
+
+class RepoStatus(BaseModel):
+    branch: str | None
+    ahead: int
+    behind: int
+    dirty: bool
+
+
+class Branch(BaseModel):
+    name: str
+    is_current: bool
