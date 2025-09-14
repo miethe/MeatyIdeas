@@ -17,6 +17,9 @@ import os
 from ..search import index_file
 from ..links import upsert_links, rewrite_wikilinks, list_outgoing_links
 import shutil
+from ..events_pub import publish_event
+from ..schemas import FilesBatchMoveRequest, FilesBatchMoveResult, FileMovePreview, DirectoryChange
+from ..models import Directory
 
 
 router = APIRouter(prefix="/files", tags=["files"])
@@ -235,6 +238,12 @@ def move_file(file_id: str, body: MoveFileRequest, db: Session = Depends(get_db)
         except Exception:
             pass
 
+    # Emit event
+    try:
+        publish_event(f.project_id, "file.moved", {"file_id": f.id, "old_path": old_path_val, "new_path": new_path})
+    except Exception:
+        pass
+
     return MoveFileApplyResult(
         will_move=will_move,
         old_path=old_path_val,
@@ -268,3 +277,221 @@ def delete_file(file_id: str, db: Session = Depends(get_db)):
     with engine.begin() as conn:
         conn.execute(text("DELETE FROM search_index WHERE file_id = :fid"), {"fid": file_id})
     return
+
+
+@router.post("/batch/move", response_model=FilesBatchMoveResult)
+def batch_move(body: FilesBatchMoveRequest, db: Session = Depends(get_db)):
+    failures: list[str] = []
+    moved_files: list[FileMovePreview] = []
+    moved_dirs: list[DirectoryChange] = []
+
+    # Handle directory moves first
+    for i, d in enumerate(body.dirs or []):
+        try:
+            from_pid = d.get("from_project_id") or ""
+            to_pid = d.get("to_project_id") or from_pid
+            old_path = d.get("path") or ""
+            new_path = d.get("new_path") or ""
+            if not from_pid or not old_path or not new_path:
+                failures.append(f"dir[{i}]: missing fields")
+                continue
+            if any(seg in old_path for seg in ["..", "\\", ":"]) or any(seg in new_path for seg in ["..", "\\", ":"]):
+                failures.append(f"dir[{i}]: bad path")
+                continue
+            from_proj = db.get(Project, from_pid)
+            to_proj = db.get(Project, to_pid)
+            if not from_proj or not to_proj:
+                failures.append(f"dir[{i}]: project not found")
+                continue
+            old_norm = "/".join([seg for seg in old_path.split("/") if seg])
+            new_norm = "/".join([seg for seg in new_path.split("/") if seg])
+
+            # Collect affected files
+            files = db.scalars(select(File).where(File.project_id == from_pid)).all()
+            affected = [f for f in files if f.path == old_norm or f.path.startswith(old_norm + "/")]
+            previews: list[FileMovePreview] = []
+            for f in affected:
+                suffix = f.path[len(old_norm) :]
+                if suffix.startswith("/"):
+                    suffix = suffix[1:]
+                newp = new_norm if not suffix else f"{new_norm}/{suffix}"
+                previews.append(FileMovePreview(file_id=f.id, old_path=f.path, new_path=newp))
+
+            # Dry run mode
+            if body.dry_run:
+                moved_dirs.append(DirectoryChange(old_path=old_norm, new_path=new_norm))
+                moved_files.extend(previews)
+                continue
+
+            # Apply on-disk move if same project; else ensure folders and move file-by-file
+            if from_pid == to_pid:
+                from_dir = os.path.join(settings.data_dir, "projects", from_proj.slug)
+                old_abs = safe_join(from_dir, "files", old_norm)
+                new_abs = safe_join(from_dir, "files", new_norm)
+                try:
+                    if os.path.isdir(old_abs):
+                        os.makedirs(os.path.dirname(new_abs), exist_ok=True)
+                        shutil.move(old_abs, new_abs)
+                    else:
+                        os.makedirs(new_abs, exist_ok=True)
+                except Exception:
+                    os.makedirs(new_abs, exist_ok=True)
+            else:
+                from_dir = os.path.join(settings.data_dir, "projects", from_proj.slug)
+                to_dir = os.path.join(settings.data_dir, "projects", to_proj.slug)
+                for pv in previews:
+                    src = safe_join(from_dir, "files", pv.old_path)
+                    dst = safe_join(to_dir, "files", pv.new_path)
+                    os.makedirs(os.path.dirname(dst), exist_ok=True)
+                    try:
+                        if os.path.isfile(src):
+                            shutil.move(src, dst)
+                    except Exception:
+                        # fallback: write from DB content
+                        fobj = db.get(File, pv.file_id)
+                        if fobj:
+                            with open(dst, "w") as fh:
+                                fh.write(fobj.content_md)
+
+            # Update DB for directories (same-project only for persisted directories)
+            if from_pid == to_pid:
+                dirs = db.scalars(select(Directory).where(Directory.project_id == from_pid)).all()
+                for drow in dirs:
+                    if drow.path == old_norm or drow.path.startswith(old_norm + "/"):
+                        suffix = drow.path[len(old_norm) :]
+                        if suffix.startswith("/"):
+                            suffix = suffix[1:]
+                        drow.path = new_norm if not suffix else f"{new_norm}/{suffix}"
+                        drow.name = drow.path.split("/")[-1]
+                        db.add(drow)
+                db.commit()
+            else:
+                # Move directory records across projects: replicate structure under dest
+                dirs = db.scalars(select(Directory).where(Directory.project_id == from_pid)).all()
+                for drow in dirs:
+                    if drow.path == old_norm or drow.path.startswith(old_norm + "/"):
+                        suffix = drow.path[len(old_norm) :]
+                        if suffix.startswith("/"):
+                            suffix = suffix[1:]
+                        newp = new_norm if not suffix else f"{new_norm}/{suffix}"
+                        db.add(Directory(project_id=to_pid, path=newp, name=(newp.split("/")[-1])))
+                # Remove originals
+                db.query(Directory).filter(Directory.project_id == from_pid, Directory.path.like(old_norm + "%")).delete(synchronize_session=False)
+                db.commit()
+
+            # Update DB for files
+            for pv in previews:
+                fobj = db.get(File, pv.file_id)
+                if not fobj:
+                    continue
+                if from_pid != to_pid:
+                    fobj.project_id = to_pid
+                fobj.path = pv.new_path
+                db.add(fobj)
+                db.commit()
+                db.refresh(fobj)
+                # reindex
+                try:
+                    with engine.begin() as conn:
+                        index_file(conn, fobj.id, f"{fobj.title}\n{fobj.content_md}", title=fobj.title, path=fobj.path)
+                except Exception:
+                    pass
+
+            moved_dirs.append(DirectoryChange(old_path=old_norm, new_path=new_norm))
+            moved_files.extend(previews)
+        except Exception as e:
+            failures.append(f"dir[{i}]: {getattr(e, 'detail', str(e))}")
+
+    # Handle individual file moves
+    for i, it in enumerate(body.files or []):
+        try:
+            fid = it.get("file_id")
+            new_path = it.get("new_path")
+            to_pid = it.get("to_project_id")
+            if not fid or not new_path:
+                failures.append(f"file[{i}]: missing fields")
+                continue
+            if any(seg in new_path for seg in ["..", "\\", ":"]):
+                failures.append(f"file[{i}]: bad path")
+                continue
+            fobj = db.get(File, fid)
+            if not fobj:
+                failures.append(f"file[{i}]: not found")
+                continue
+            dest_pid = to_pid or fobj.project_id
+            from_proj = db.get(Project, fobj.project_id)
+            to_proj = db.get(Project, dest_pid)
+            if not from_proj or not to_proj:
+                failures.append(f"file[{i}]: project not found")
+                continue
+            oldp = fobj.path
+            newp = "/".join([seg for seg in new_path.split("/") if seg])
+            preview = FileMovePreview(file_id=fobj.id, old_path=oldp, new_path=newp)
+            if body.dry_run:
+                moved_files.append(preview)
+                continue
+
+            # Move on disk
+            if fobj.project_id == dest_pid:
+                base = os.path.join(settings.data_dir, "projects", from_proj.slug)
+                src = safe_join(base, "files", oldp)
+                dst = safe_join(base, "files", newp)
+            else:
+                base_from = os.path.join(settings.data_dir, "projects", from_proj.slug)
+                base_to = os.path.join(settings.data_dir, "projects", to_proj.slug)
+                src = safe_join(base_from, "files", oldp)
+                dst = safe_join(base_to, "files", newp)
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            try:
+                if os.path.isfile(src):
+                    shutil.move(src, dst)
+                else:
+                    # write from DB content if file missing
+                    with open(dst, "w") as fh:
+                        fh.write(fobj.content_md)
+            except Exception:
+                with open(dst, "w") as fh:
+                    fh.write(fobj.content_md)
+
+            # Update DB
+            if fobj.project_id != dest_pid:
+                fobj.project_id = dest_pid
+            fobj.path = newp
+            db.add(fobj)
+            db.commit()
+            db.refresh(fobj)
+            # reindex
+            try:
+                with engine.begin() as conn:
+                    index_file(conn, fobj.id, f"{fobj.title}\n{fobj.content_md}", title=fobj.title, path=fobj.path)
+            except Exception:
+                pass
+
+            moved_files.append(preview)
+        except Exception as e:
+            failures.append(f"file[{i}]: {getattr(e, 'detail', str(e))}")
+
+    # Publish a single batch event
+    total_dirs = len(moved_dirs)
+    total_files = len(moved_files)
+    if total_dirs or total_files:
+        # If mixed projects, project_id in payload is ambiguous; emit for each encountered project for visibility
+        project_ids: set[str] = set()
+        for mv in moved_files:
+            fobj = db.get(File, mv.file_id)
+            if fobj:
+                project_ids.add(fobj.project_id)
+        for pid in project_ids or {""}:
+            try:
+                publish_event(pid, "files.batch_moved", {"files": total_files, "dirs": total_dirs})
+            except Exception:
+                pass
+
+    return FilesBatchMoveResult(
+        applied=not body.dry_run,
+        moved_files=moved_files,
+        moved_dirs=moved_dirs,
+        failures=failures,
+        files_count=len(moved_files),
+        dirs_count=len(moved_dirs),
+    )

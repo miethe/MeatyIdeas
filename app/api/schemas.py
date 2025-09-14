@@ -225,3 +225,75 @@ class RepoStatus(BaseModel):
 class Branch(BaseModel):
     name: str
     is_current: bool
+
+
+# Phase 3 — Directories & Batch Moves
+class DirectoryCreate(BaseModel):
+    path: str
+
+
+class DirectoryRead(BaseModel):
+    id: str
+    project_id: str
+    path: str
+    name: str
+    created_at: dt.datetime
+    updated_at: dt.datetime
+
+    class Config:
+        from_attributes = True
+
+
+class DirectoryMoveRequest(BaseModel):
+    old_path: str
+    new_path: str
+    dry_run: bool = False
+
+
+class DirectoryChange(BaseModel):
+    old_path: str
+    new_path: str
+
+
+class FileMovePreview(BaseModel):
+    file_id: str
+    old_path: str
+    new_path: str
+
+
+class DirectoryMoveDryRunResult(BaseModel):
+    applied: bool = False
+    dir_changes: list[DirectoryChange] = Field(default_factory=list)
+    file_moves: list[FileMovePreview] = Field(default_factory=list)
+    dirs_count: int = 0
+    files_count: int = 0
+
+
+class DirectoryMoveApplyResult(DirectoryMoveDryRunResult):
+    applied: bool = True
+
+
+class DirectoryDeleteRequest(BaseModel):
+    path: str
+    force: bool = False
+
+
+class DirectoryDeleteResult(BaseModel):
+    deleted: bool
+    removed_dirs: int = 0
+
+
+class FilesBatchMoveRequest(BaseModel):
+    files: list[dict[str, str]] = Field(default_factory=list)  # {file_id, to_project_id?, new_path}
+    dirs: list[dict[str, str]] = Field(default_factory=list)   # {path, from_project_id, to_project_id?, new_path}
+    update_links: bool = True
+    dry_run: bool = False
+
+
+class FilesBatchMoveResult(BaseModel):
+    applied: bool
+    moved_files: list[FileMovePreview] = Field(default_factory=list)
+    moved_dirs: list[DirectoryChange] = Field(default_factory=list)
+    failures: list[str] = Field(default_factory=list)
+    files_count: int = 0
+    dirs_count: int = 0

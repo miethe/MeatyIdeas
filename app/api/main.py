@@ -10,6 +10,7 @@ from .db import Base, engine, init_db
 from .app_logging import setup_logging
 from .models import *  # noqa
 from .routers import projects, files, search, artifacts, bundles
+from .routers import dirs as dirs_router
 from .routers import repos as repos_router
 from .routers import profile as profile_router
 from .routers import config as config_router
@@ -61,6 +62,35 @@ def on_startup() -> None:
         if not u:
             _db.add(_User(id="local", name="Local User", email="", avatar_url=None, preferences={}))
             _db.commit()
+    # Phase 3: backfill directories from existing file paths when enabled
+    try:
+        if int(settings.dirs_persist or 0) == 1:
+            from .models import Project as _Project
+            from .models import File as _File
+            from .models import Directory as _Directory
+
+            with _SessionLocal() as _db:
+                projects = _db.query(_Project).all()
+                for p in projects:
+                    # Build set of all parent directories from files
+                    paths: set[str] = set()
+                    files = _db.query(_File).filter(_File.project_id == p.id).all()
+                    for f in files:
+                        parts = [seg for seg in f.path.split("/") if seg]
+                        acc: list[str] = []
+                        for seg in parts[:-1]:
+                            acc.append(seg)
+                            paths.add("/".join(acc))
+                    # Insert missing directories
+                    if paths:
+                        existing = {d.path for d in _db.query(_Directory).filter(_Directory.project_id == p.id).all()}
+                        for dp in sorted(paths):
+                            if dp not in existing:
+                                _db.add(_Directory(project_id=p.id, path=dp, name=dp.split("/")[-1]))
+                        _db.commit()
+    except Exception:
+        # Do not block startup on backfill issues
+        pass
 
 
 @app.get("/api/healthz")
@@ -78,6 +108,7 @@ app.include_router(artifacts.router, prefix="/api", dependencies=auth)
 app.include_router(bundles.router, prefix="/api", dependencies=auth)
 app.include_router(bundles.bundles_router, prefix="/api", dependencies=auth)
 app.include_router(repos_router.router, prefix="/api", dependencies=auth)
+app.include_router(dirs_router.router, prefix="/api", dependencies=auth)
 app.include_router(events_router.router, prefix="/api")
 app.include_router(jobs_router.router, prefix="/api", dependencies=auth)
 app.include_router(attachments_router.router, prefix="/api", dependencies=auth)

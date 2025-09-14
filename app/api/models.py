@@ -11,6 +11,7 @@ from sqlalchemy import (
     Enum,
     DateTime,
     ForeignKey,
+    UniqueConstraint,
 )
 from sqlalchemy.dialects.sqlite import JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -46,6 +47,8 @@ class Project(Base):
     files: Mapped[list["File"]] = relationship("File", back_populates="project")
     artifacts: Mapped[list["ArtifactRepo"]] = relationship("ArtifactRepo", back_populates="project")
     repos: Mapped[list["Repo"]] = relationship("Repo", back_populates="project")
+    # Directories relationship added in Phase 3
+    directories: Mapped[list["Directory"]] = relationship("Directory", back_populates="project")
 
 
 class User(Base):
@@ -76,6 +79,20 @@ class File(Base):
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
     project: Mapped[Project] = relationship("Project", back_populates="files")
+
+
+class Directory(Base):
+    __tablename__ = "directories"
+    __table_args__ = (UniqueConstraint("project_id", "path", name="uix_directory_project_path"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    project_id: Mapped[str] = mapped_column(String, ForeignKey("projects.id"), nullable=False)
+    path: Mapped[str] = mapped_column(String, nullable=False)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+    project: Mapped[Project] = relationship("Project", back_populates="directories")
 
 
 class ArtifactRepo(Base):

@@ -132,13 +132,19 @@ def list_project_files(project_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/{project_id}/files/tree")
-def get_project_files_tree(project_id: str, db: Session = Depends(get_db)):
+def get_project_files_tree(
+    project_id: str,
+    include_empty_dirs: int | None = 0,
+    depth: int | None = None,
+    db: Session = Depends(get_db),
+):
     p = db.get(Project, project_id)
     if not p:
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND"})
-    # Build tree from file paths
+    # Build tree from file paths and (optionally) persisted empty directories
     files = db.scalars(select(File).where(File.project_id == project_id)).all()
     root: dict = {"name": "", "path": "", "type": "dir", "children": {}}
+    # Insert file-derived paths
     for f in files:
         parts = [seg for seg in f.path.split("/") if seg]
         cur = root
@@ -164,6 +170,27 @@ def get_project_files_tree(project_id: str, db: Session = Depends(get_db)):
                     cur["children"][seg] = {"name": seg, "path": "/".join(acc), "type": "dir", "children": {}}
                 cur = cur["children"][seg]
 
+    # Optionally include persisted empty directories
+    try:
+        from ..models import Directory  # local import to avoid cycles
+
+        if int(include_empty_dirs or 0) == 1:
+            dirs = db.scalars(select(Directory).where(Directory.project_id == project_id)).all()
+            for d in dirs:
+                parts = [seg for seg in d.path.split("/") if seg]
+                cur = root
+                acc = []
+                for i, seg in enumerate(parts):
+                    acc.append(seg)
+                    if "children" not in cur:
+                        cur["children"] = {}
+                    if seg not in cur["children"]:
+                        cur["children"][seg] = {"name": seg, "path": "/".join(acc), "type": "dir", "children": {}}
+                    cur = cur["children"][seg]
+    except Exception:
+        # If Directory table missing, ignore
+        pass
+
     def to_list(node: dict) -> list:
         if "children" not in node:
             return []
@@ -179,4 +206,24 @@ def get_project_files_tree(project_id: str, db: Session = Depends(get_db)):
         items.sort(key=lambda x: (0 if x["type"] == "dir" else 1, x["name"].lower()))
         return items
 
-    return to_list(root)
+    items = to_list(root)
+
+    # Depth limiting: depth=1 returns only top-level items
+    if depth and isinstance(depth, int) and depth > 0:
+        def prune(nodes: list[dict], current_depth: int) -> list[dict]:
+            out: list[dict] = []
+            for n in nodes:
+                if n.get("type") == "dir":
+                    nn = {k: v for k, v in n.items() if k != "children"}
+                    if current_depth < depth and n.get("children"):
+                        nn["children"] = prune(n.get("children", []), current_depth + 1)
+                    else:
+                        nn["children"] = []
+                    out.append(nn)
+                else:
+                    out.append(n)
+            return out
+
+        items = prune(items, 1)
+
+    return items
