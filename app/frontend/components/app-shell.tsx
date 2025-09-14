@@ -10,7 +10,7 @@ import { ProjectCreateSheet } from '@/components/projects/project-create-sheet'
 import { useHotkeys } from 'react-hotkeys-hook'
 import { ProfileMenu } from '@/components/profile/profile-menu'
 import { ResultsModal } from '@/components/search/results-modal'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiGet } from '@/lib/apiClient'
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -59,7 +59,7 @@ function SidebarSections({ projects, onOpenResults, onOpenTag }: { projects: any
     try { return JSON.parse(localStorage.getItem('sidebar.projects') || '{}') } catch { return {} }
   })
   React.useEffect(() => { try { localStorage.setItem('sidebar.projects', JSON.stringify(openProjects)) } catch {} }, [openProjects])
-  const qc = require('@tanstack/react-query').useQueryClient()
+  const qc = useQueryClient()
   function toggleProject(id: string) {
     setOpenProjects((s) => ({ ...s, [id]: !s[id] }))
   }
