@@ -19,6 +19,8 @@ from .routers import events as events_router
 from .routers import jobs as jobs_router
 from .routers import attachments as attachments_router
 from .routers import render as render_router
+from .routers import import_export as import_export_router
+from .routers import sharing as sharing_router
 from .settings import settings
 
 
@@ -116,3 +118,6 @@ app.include_router(render_router.router, prefix="/api", dependencies=auth)
 app.include_router(profile_router.router, prefix="/api", dependencies=auth)
 app.include_router(config_router.router, prefix="/api")
 app.include_router(tags_router.router, prefix="/api", dependencies=auth)
+app.include_router(import_export_router.router, prefix="/api", dependencies=auth)
+app.include_router(sharing_router.router, prefix="/api", dependencies=auth)
+app.include_router(sharing_router.public_router, prefix="/api")

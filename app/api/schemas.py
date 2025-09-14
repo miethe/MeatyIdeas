@@ -297,3 +297,38 @@ class FilesBatchMoveResult(BaseModel):
     failures: list[str] = Field(default_factory=list)
     files_count: int = 0
     dirs_count: int = 0
+
+
+# Phase 4 — Import/Export
+class ProjectExportSelection(BaseModel):
+    file_ids: list[str] = Field(default_factory=list)
+    include_paths: list[str] = Field(default_factory=list)
+
+
+class ProjectExportRequest(BaseModel):
+    mode: str = "zip"  # zip | json
+    selection: ProjectExportSelection | None = None
+
+
+class JobEnqueueResponse(BaseModel):
+    job_id: str
+    result_url: str | None = None
+
+
+# Phase 4 — Share Links
+class ShareLinkCreate(BaseModel):
+    expires_at: dt.datetime | None = None
+    allow_export: bool = False
+
+
+class ShareLinkRead(BaseModel):
+    id: str
+    project_id: str
+    token: str
+    permissions: str
+    expires_at: dt.datetime | None
+    revoked_at: dt.datetime | None
+    created_at: dt.datetime
+
+    class Config:
+        from_attributes = True

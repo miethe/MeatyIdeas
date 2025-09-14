@@ -106,7 +106,7 @@ export function FileTree({ projectId, onOpenFile }: { projectId: string; onOpenF
       )
     }
     return (
-      <li key={node.path} className={"my-1 flex items-center justify-between gap-2 " + (selected.has(node.file_id || '') ? 'bg-accent/30' : '')}
+      <li key={node.path} className={"my-1 flex items-center justify-between gap-2 " + (selected.has(node.file_id || '') ? 'bg-accent/30' : '')}>
         <a
           href="#"
           className="truncate hover:underline"

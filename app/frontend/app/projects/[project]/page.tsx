@@ -14,6 +14,8 @@ import { span } from '@/lib/telemetry'
 import { ArtifactsPanel } from '@/components/artifacts-panel'
 import { ReposPanel } from '@/components/repos/repos-panel'
 import { ExportBundleWizard } from '@/components/bundles/export-bundle-wizard'
+import { ImportDialog } from '@/components/projects/import-dialog'
+import { ShareLinksDialog } from '@/components/projects/share-links-dialog'
 import { BundlesHistory } from '@/components/bundles/bundles-history'
 import { ProjectEvents } from '@/components/projects/project-events'
 import { FileTree } from '@/components/files/file-tree'
@@ -26,6 +28,7 @@ export default function ProjectPage() {
   const [projectId, setProjectId] = useState<string | null>(null)
   const [selected, setSelected] = useState<FileItem | null>(null)
   const [gitEnabled, setGitEnabled] = useState(false)
+  const [shareEnabled, setShareEnabled] = useState(false)
 
   const projList = useQuery({
     queryKey: ['projects'],
@@ -68,7 +71,10 @@ export default function ProjectPage() {
   }, [projectId])
 
   useEffect(() => {
-    import('@/lib/config').then(({ getConfig }) => getConfig().then((cfg) => setGitEnabled((cfg.GIT_INTEGRATION || 0) === 1)))
+    import('@/lib/config').then(({ getConfig }) => getConfig().then((cfg) => {
+      setGitEnabled((cfg.GIT_INTEGRATION || 0) === 1)
+      setShareEnabled((cfg.SHARE_LINKS || 0) === 1)
+    }))
   }, [])
 
   return (
@@ -81,6 +87,14 @@ export default function ProjectPage() {
         </div>
         {projectId && (
           <div className="flex items-center gap-2">
+            <ImportDialog projectId={projectId || undefined}>
+              <Button variant="outline">Import</Button>
+            </ImportDialog>
+            {shareEnabled && (
+              <ShareLinksDialog projectId={projectId || ''}>
+                <Button variant="outline">Share</Button>
+              </ShareLinksDialog>
+            )}
             <ExportBundleWizard projectId={projectId} />
             <FileCreateDialog projectId={projectId}>
               <Button>New File</Button>
