@@ -332,3 +332,35 @@ class ShareLinkRead(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# Phase 5 — Project Groups
+class ProjectGroupCreate(BaseModel):
+    name: str
+    color: str | None = None
+    sort_order: int | None = None
+
+
+class ProjectGroupUpdate(BaseModel):
+    name: str | None = None
+    color: str | None = None
+    sort_order: int | None = None
+
+
+class ProjectGroupRead(BaseModel):
+    id: str
+    name: str
+    color: str | None
+    sort_order: int
+
+    class Config:
+        from_attributes = True
+
+
+class ProjectGroupWithProjects(ProjectGroupRead):
+    projects: list[ProjectRead] = Field(default_factory=list)
+
+
+class GroupAssignRequest(BaseModel):
+    project_id: str
+    position: int | None = None

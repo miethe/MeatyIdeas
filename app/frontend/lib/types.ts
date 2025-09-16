@@ -57,3 +57,17 @@ export const RepoStatusSchema = z.object({
   dirty: z.boolean(),
 })
 export type RepoStatus = z.infer<typeof RepoStatusSchema>
+
+// Phase 5 — Groups
+export const ProjectGroupSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  color: z.string().nullable().optional(),
+  sort_order: z.number(),
+})
+export type ProjectGroup = z.infer<typeof ProjectGroupSchema>
+
+export const ProjectGroupWithProjectsSchema = ProjectGroupSchema.extend({
+  projects: z.array(ProjectSchema),
+})
+export type ProjectGroupWithProjects = z.infer<typeof ProjectGroupWithProjectsSchema>

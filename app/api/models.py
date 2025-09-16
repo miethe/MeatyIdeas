@@ -12,6 +12,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     UniqueConstraint,
+    Integer,
 )
 from sqlalchemy.dialects.sqlite import JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -188,3 +189,31 @@ class ShareLink(Base):
     __table_args__ = (
         UniqueConstraint("token", name="uq_share_links_token"),
     )
+
+
+# Phase 5 — Project Groups
+class ProjectGroup(Base):
+    __tablename__ = "project_groups"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    color: Mapped[str | None] = mapped_column(String, nullable=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    memberships: Mapped[list["ProjectGroupMembership"]] = relationship(
+        "ProjectGroupMembership",
+        cascade="all, delete-orphan",
+        primaryjoin="ProjectGroup.id==ProjectGroupMembership.group_id",
+        order_by="ProjectGroupMembership.sort_order",
+    )
+
+
+class ProjectGroupMembership(Base):
+    __tablename__ = "project_group_memberships"
+    __table_args__ = (
+        UniqueConstraint("project_id", name="uq_group_membership_project"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    project_id: Mapped[str] = mapped_column(String, ForeignKey("projects.id"), nullable=False)
+    group_id: Mapped[str] = mapped_column(String, ForeignKey("project_groups.id"), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
