@@ -6,7 +6,7 @@ from fastapi import FastAPI, Header, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
-from .db import Base, engine, init_db
+from .db import engine, init_db
 from .app_logging import setup_logging
 from .models import *  # noqa
 from .routers import projects, files, search, artifacts, bundles
@@ -23,6 +23,7 @@ from .routers import import_export as import_export_router
 from .routers import groups as groups_router
 from .routers import sharing as sharing_router
 from .settings import settings
+from .migrations import run_upgrade_head
 
 
 setup_logging()
@@ -49,7 +50,7 @@ def verify_token(x_token: str | None = Header(default=None)) -> None:
 
 @app.on_event("startup")
 def on_startup() -> None:
-    Base.metadata.create_all(engine)
+    run_upgrade_head()
     init_db()
     # Optional seed
     if int(settings.seed_demo or 0) == 1:

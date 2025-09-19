@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from typing import List
+import time
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -23,6 +24,10 @@ from ..git_ops import (
     is_dirty as _is_dirty,
 )
 from ..events_pub import publish_event
+from ..app_logging import get_logger
+
+
+logger = get_logger(component="repos.api")
 
 
 router = APIRouter(prefix="/repos", tags=["repos"])
@@ -53,6 +58,16 @@ def _repo_fs_path(db: Session, r: Repo) -> str:
         return os.path.join(settings.data_dir, "repos", r.id)
 
 
+def _log_repo(action: str, repo: Repo | None, start: float, level: str = "info", **extra: object) -> None:
+    duration_ms = int((time.perf_counter() - start) * 1000)
+    payload: dict[str, object] = {"duration_ms": duration_ms}
+    if repo is not None:
+        payload.update(repo_id=repo.id, project_id=repo.project_id, provider=repo.provider)
+    payload.update(extra)
+    log = getattr(logger, level, logger.info)
+    log(action, **payload)
+
+
 @router.post("", response_model=RepoOut, status_code=201, dependencies=[Depends(require_git_enabled)])
 def create_repo(body: RepoCreate, db: Session = Depends(get_db)):
     # Validate project when project scope
@@ -77,10 +92,13 @@ def create_repo(body: RepoCreate, db: Session = Depends(get_db)):
     db.refresh(r)
     # Ensure FS repo exists
     fs_path = _repo_fs_path(db, r)
+    start = time.perf_counter()
     try:
         ensure_repo(fs_path, r.repo_url)
     except GitError as e:
+        _log_repo("repo.create.error", r, start, level="warning", error_code=e.code)
         raise HTTPException(status_code=400, detail={"code": e.code, "message": e.message})
+    _log_repo("repo.create", r, start, repo_url=r.repo_url)
     # Event
     if r.project_id:
         publish_event(project_id=r.project_id, event_type="repo.created", payload={"repo_id": r.id})
@@ -102,6 +120,7 @@ def delete_repo(repo_id: str, db: Session = Depends(get_db)):
     r = db.get(Repo, repo_id)
     if not r:
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Repo"})
+    start = time.perf_counter()
     # Best-effort delete folder
     fs_path = _repo_fs_path(db, r)
     try:
@@ -115,6 +134,7 @@ def delete_repo(repo_id: str, db: Session = Depends(get_db)):
     db.commit()
     if r.project_id:
         publish_event(project_id=r.project_id, event_type="repo.deleted", payload={"repo_id": r.id})
+    _log_repo("repo.delete", r, start)
     return None
 
 
@@ -124,13 +144,16 @@ def repo_status(repo_id: str, db: Session = Depends(get_db)):
     if not r:
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Repo"})
     fs_path = _repo_fs_path(db, r)
+    start = time.perf_counter()
     try:
         st = _repo_status(fs_path, r.default_branch)
         dirty = _is_dirty(fs_path)
         if r.project_id:
             publish_event(project_id=r.project_id, event_type="repo.status", payload={"repo_id": r.id, **st, "dirty": dirty})
+        _log_repo("repo.status", r, start, ahead=st.get("ahead", 0), behind=st.get("behind", 0), dirty=dirty)
         return RepoStatus(branch=st.get("branch"), ahead=st.get("ahead", 0), behind=st.get("behind", 0), dirty=dirty)
     except GitError as e:
+        _log_repo("repo.status.error", r, start, level="warning", error_code=e.code)
         raise HTTPException(status_code=400, detail={"code": e.code, "message": e.message})
 
 
@@ -152,12 +175,15 @@ def repo_create_branch(repo_id: str, body: dict, db: Session = Depends(get_db)):
     if not r:
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Repo"})
     fs_path = _repo_fs_path(db, r)
+    start = time.perf_counter()
     try:
         _create_branch(fs_path, name, checkout=True)
         if r.project_id:
             publish_event(project_id=r.project_id, event_type="repo.branch_created", payload={"repo_id": r.id, "name": name})
+        _log_repo("repo.branch_create", r, start, branch=name)
         return {"status": "ok"}
     except GitError as e:
+        _log_repo("repo.branch_create.error", r, start, level="warning", error_code=e.code)
         raise HTTPException(status_code=400, detail={"code": e.code, "message": e.message})
 
 
@@ -170,12 +196,15 @@ def repo_checkout(repo_id: str, body: dict, db: Session = Depends(get_db)):
     if not r:
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Repo"})
     fs_path = _repo_fs_path(db, r)
+    start = time.perf_counter()
     try:
         _checkout_branch(fs_path, name)
         if r.project_id:
             publish_event(project_id=r.project_id, event_type="repo.checkout", payload={"repo_id": r.id, "name": name})
+        _log_repo("repo.checkout", r, start, branch=name)
         return {"status": "ok"}
     except GitError as e:
+        _log_repo("repo.checkout.error", r, start, level="warning", error_code=e.code)
         raise HTTPException(status_code=400, detail={"code": e.code, "message": e.message})
 
 
@@ -185,12 +214,15 @@ def repo_pull(repo_id: str, db: Session = Depends(get_db)):
     if not r:
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Repo"})
     fs_path = _repo_fs_path(db, r)
+    start = time.perf_counter()
     try:
         res = _pull(fs_path)
         if r.project_id:
             publish_event(project_id=r.project_id, event_type="repo.pull", payload={"repo_id": r.id, **res})
+        _log_repo("repo.pull", r, start)
         return res
     except GitError as e:
+        _log_repo("repo.pull.error", r, start, level="warning", error_code=e.code)
         raise HTTPException(status_code=400, detail={"code": e.code, "message": e.message})
 
 
@@ -200,12 +232,15 @@ def repo_push(repo_id: str, db: Session = Depends(get_db)):
     if not r:
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Repo"})
     fs_path = _repo_fs_path(db, r)
+    start = time.perf_counter()
     try:
         res = _push(fs_path)
         if r.project_id:
             publish_event(project_id=r.project_id, event_type="repo.push", payload={"repo_id": r.id, **res})
+        _log_repo("repo.push", r, start)
         return res
     except GitError as e:
+        _log_repo("repo.push.error", r, start, level="warning", error_code=e.code)
         raise HTTPException(status_code=400, detail={"code": e.code, "message": e.message})
 
 
@@ -215,8 +250,11 @@ def repo_history(repo_id: str, limit: int = 20, db: Session = Depends(get_db)):
     if not r:
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Repo"})
     fs_path = _repo_fs_path(db, r)
+    start = time.perf_counter()
     try:
         items = _repo_history(fs_path, limit)
+        _log_repo("repo.history", r, start, count=len(items), limit=limit)
         return items
     except GitError as e:
+        _log_repo("repo.history.error", r, start, level="warning", error_code=e.code)
         raise HTTPException(status_code=400, detail={"code": e.code, "message": e.message})

@@ -11,6 +11,7 @@ type ShareLink = {
   project_id: string
   token: string
   permissions: string
+  allow_export: boolean
   expires_at?: string | null
   revoked_at?: string | null
   created_at: string
@@ -18,10 +19,12 @@ type ShareLink = {
 
 export function ShareLinksDialog({ projectId, children }: { projectId: string; children: React.ReactNode }) {
   const [open, setOpen] = React.useState(false)
+  const [allowExport, setAllowExport] = React.useState(false)
   const qc = useQueryClient()
   const list = useQuery({ queryKey: ['share-links', projectId, open], queryFn: async () => (open ? apiGet<ShareLink[]>(`/projects/${projectId}/share-links`) : []), enabled: !!projectId })
   const create = useMutation({
-    mutationFn: async (expiresAt: string | null) => apiJson<ShareLink>('POST', `/projects/${projectId}/share-links`, { expires_at: expiresAt }),
+    mutationFn: async ({ expiresAt, allowExport }: { expiresAt: string | null; allowExport: boolean }) =>
+      apiJson<ShareLink>('POST', `/projects/${projectId}/share-links`, { expires_at: expiresAt, allow_export: allowExport }),
     onSuccess: (sl) => {
       qc.invalidateQueries({ queryKey: ['share-links', projectId] })
       const url = `${window.location.origin}/share/${sl.token}`
@@ -43,15 +46,21 @@ export function ShareLinksDialog({ projectId, children }: { projectId: string; c
         <DialogHeader>
           <DialogTitle>Share Links</DialogTitle>
         </DialogHeader>
-        <div className="flex items-center gap-2">
-          <Button onClick={() => create.mutate(null)} disabled={create.isPending}>Create</Button>
+        <div className="flex items-center gap-3">
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={allowExport} onChange={(e) => setAllowExport(e.target.checked)} />
+            Allow export downloads
+          </label>
+        </div>
+        <div className="mt-2 flex items-center gap-2">
+          <Button onClick={() => create.mutate({ expiresAt: null, allowExport })} disabled={create.isPending}>Create</Button>
           <Button variant="outline" onClick={() => {
             const days = prompt('Expire in N days (empty for none)')
             if (days === null) return
             const n = parseInt(days)
-            if (isNaN(n)) return create.mutate(null)
+            if (isNaN(n)) return create.mutate({ expiresAt: null, allowExport })
             const dtStr = new Date(Date.now() + n * 86400000).toISOString()
-            create.mutate(dtStr)
+            create.mutate({ expiresAt: dtStr, allowExport })
           }}>Create with expiry…</Button>
         </div>
         <div className="max-h-64 overflow-auto">
@@ -61,6 +70,7 @@ export function ShareLinksDialog({ projectId, children }: { projectId: string; c
                 <li key={sl.id} className="flex items-center gap-2 py-2">
                   <code className="truncate">{`${window.location.origin}/share/${sl.token}`}</code>
                   <span className="text-xs text-muted-foreground">{sl.expires_at ? `expires ${new Date(sl.expires_at).toLocaleString()}` : 'no expiry'}</span>
+                  <span className="text-xs text-muted-foreground">{sl.allow_export ? 'export allowed' : 'view only'}</span>
                   <div className="ml-auto flex items-center gap-1">
                     <Button size="sm" variant="outline" onClick={() => navigator.clipboard.writeText(`${window.location.origin}/share/${sl.token}`)}>Copy</Button>
                     <Button size="sm" variant="destructive" onClick={() => revoke.mutate(sl.id)}>Revoke</Button>
@@ -76,4 +86,3 @@ export function ShareLinksDialog({ projectId, children }: { projectId: string; c
     </Dialog>
   )
 }
-

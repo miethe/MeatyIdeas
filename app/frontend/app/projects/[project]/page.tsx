@@ -29,6 +29,7 @@ export default function ProjectPage() {
   const [selected, setSelected] = useState<FileItem | null>(null)
   const [gitEnabled, setGitEnabled] = useState(false)
   const [shareEnabled, setShareEnabled] = useState(false)
+  const [dirsEnabled, setDirsEnabled] = useState(false)
 
   const projList = useQuery({
     queryKey: ['projects'],
@@ -74,6 +75,7 @@ export default function ProjectPage() {
     import('@/lib/config').then(({ getConfig }) => getConfig().then((cfg) => {
       setGitEnabled((cfg.GIT_INTEGRATION || 0) === 1)
       setShareEnabled((cfg.SHARE_LINKS || 0) === 1)
+      setDirsEnabled((cfg.DIRS_PERSIST || 0) === 1)
     }))
   }, [])
 
@@ -106,7 +108,7 @@ export default function ProjectPage() {
         {projectId && gitEnabled ? <ReposPanel projectId={projectId} /> : projectId && <ArtifactsPanel projectId={projectId} />}
         {projectId && <BundlesHistory projectId={projectId} />}
       </div>
-      {projectId && (
+      {projectId && dirsEnabled && (
         <div className="mb-6">
           <FileTree projectId={projectId} onOpenFile={(fid) => setSelected(files.data?.find((x) => x.id === fid) || null)} />
         </div>

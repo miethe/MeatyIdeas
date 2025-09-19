@@ -326,6 +326,7 @@ class ShareLinkRead(BaseModel):
     project_id: str
     token: str
     permissions: str
+    allow_export: bool
     expires_at: dt.datetime | None
     revoked_at: dt.datetime | None
     created_at: dt.datetime

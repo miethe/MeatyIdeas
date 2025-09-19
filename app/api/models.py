@@ -4,16 +4,7 @@ import datetime as dt
 import uuid
 from typing import Any
 
-from sqlalchemy import (
-    Column,
-    String,
-    Text,
-    Enum,
-    DateTime,
-    ForeignKey,
-    UniqueConstraint,
-    Integer,
-)
+from sqlalchemy import Column, String, Text, Enum, DateTime, ForeignKey, UniqueConstraint, Integer, Boolean
 from sqlalchemy.dialects.sqlite import JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -182,6 +173,7 @@ class ShareLink(Base):
     project_id: Mapped[str] = mapped_column(String, ForeignKey("projects.id"), nullable=False)
     token: Mapped[str] = mapped_column(String, nullable=False, unique=True)
     permissions: Mapped[str] = mapped_column(String, default="read")
+    allow_export: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     expires_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     revoked_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now_utc)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import time
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -25,9 +26,28 @@ from ..schemas import (
 from ..settings import settings
 from ..utils import safe_join
 from ..search import index_file
+from ..app_logging import get_logger
 
 
-router = APIRouter(prefix="/projects", tags=["directories"])
+def require_dirs_enabled():
+    if int(settings.dirs_persist or 0) != 1:
+        raise HTTPException(status_code=404, detail={"code": "NOT_ENABLED", "message": "Directories disabled"})
+
+
+router = APIRouter(
+    prefix="/projects",
+    tags=["directories"],
+    dependencies=[Depends(require_dirs_enabled)],
+)
+
+logger = get_logger(component="directories.api")
+
+
+def _log_dir_event(action: str, project_id: str, start: float, level: str = "info", **extra: object) -> None:
+    duration_ms = int((time.perf_counter() - start) * 1000)
+    payload: dict[str, object] = {"project_id": project_id, "duration_ms": duration_ms}
+    payload.update(extra)
+    getattr(logger, level, logger.info)(action, **payload)
 
 
 def get_db():
@@ -51,11 +71,13 @@ def create_dir(project_id: str, body: DirectoryCreate, db: Session = Depends(get
     proj = db.get(Project, project_id)
     if not proj:
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Project"})
+    start = time.perf_counter()
     norm = "/".join([seg for seg in body.path.split("/") if seg])
     name = norm.split("/")[-1]
     # Upsert: unique per (project, path)
     existing = db.scalars(select(Directory).where(Directory.project_id == project_id, Directory.path == norm)).first()
     if existing:
+        _log_dir_event("dir.create.noop", project_id, start, path=norm)
         return existing
     d = Directory(project_id=project_id, path=norm, name=name)
     db.add(d)
@@ -66,6 +88,7 @@ def create_dir(project_id: str, body: DirectoryCreate, db: Session = Depends(get
     abs_dir = safe_join(proj_dir, "files", norm)
     os.makedirs(abs_dir, exist_ok=True)
     publish_event(project_id, "dir.created", {"path": norm})
+    _log_dir_event("dir.create", project_id, start, path=norm)
     return d
 
 
@@ -76,6 +99,7 @@ def move_dir(project_id: str, body: DirectoryMoveRequest, db: Session = Depends(
     proj = db.get(Project, project_id)
     if not proj:
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Project"})
+    start = time.perf_counter()
     old_norm = "/".join([seg for seg in body.old_path.split("/") if seg])
     new_norm = "/".join([seg for seg in body.new_path.split("/") if seg])
     if old_norm == new_norm:
@@ -106,6 +130,15 @@ def move_dir(project_id: str, body: DirectoryMoveRequest, db: Session = Depends(
         file_moves.append(FileMovePreview(file_id=f.id, old_path=f.path, new_path=new_path))
 
     if body.dry_run:
+        _log_dir_event(
+            "dir.move.dry_run",
+            project_id,
+            start,
+            dirs=len(dir_changes),
+            files=len(file_moves),
+            old_path=old_norm,
+            new_path=new_norm,
+        )
         return DirectoryMoveDryRunResult(
             applied=False,
             dir_changes=dir_changes,
@@ -155,6 +188,15 @@ def move_dir(project_id: str, body: DirectoryMoveRequest, db: Session = Depends(
             pass
 
     publish_event(project_id, "dir.moved", {"old_path": old_norm, "new_path": new_norm, "dirs": len(dir_changes), "files": len(file_moves)})
+    _log_dir_event(
+        "dir.move",
+        project_id,
+        start,
+        dirs=len(dir_changes),
+        files=len(file_moves),
+        old_path=old_norm,
+        new_path=new_norm,
+    )
     return DirectoryMoveApplyResult(
         applied=True,
         dir_changes=dir_changes,
@@ -170,6 +212,7 @@ def delete_dir(project_id: str, body: DirectoryDeleteRequest, db: Session = Depe
     proj = db.get(Project, project_id)
     if not proj:
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Project"})
+    start = time.perf_counter()
     norm = "/".join([seg for seg in body.path.split("/") if seg])
     # Check emptiness unless force
     if not body.force:
@@ -202,5 +245,5 @@ def delete_dir(project_id: str, body: DirectoryDeleteRequest, db: Session = Depe
         pass
 
     publish_event(project_id, "dir.deleted", {"path": norm, "removed": removed})
+    _log_dir_event("dir.delete", project_id, start, path=norm, removed_dirs=removed, forced=bool(body.force))
     return DirectoryDeleteResult(deleted=True, removed_dirs=removed)
-

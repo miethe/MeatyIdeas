@@ -1,6 +1,7 @@
 fastapi==0.112.0
 uvicorn[standard]==0.30.6
 sqlalchemy==2.0.35
+alembic==1.13.1
 pydantic==2.9.2
 pydantic-settings==2.5.2
 python-dotenv==1.0.1
@@ -21,4 +22,3 @@ pytest==8.3.3
 ruff==0.6.8
 black==24.8.0
 mypy==1.11.2
-

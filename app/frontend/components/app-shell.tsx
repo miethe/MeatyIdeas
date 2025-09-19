@@ -10,8 +10,9 @@ import { ProjectCreateSheet } from '@/components/projects/project-create-sheet'
 import { useHotkeys } from 'react-hotkeys-hook'
 import { ProfileMenu } from '@/components/profile/profile-menu'
 import { ResultsModal } from '@/components/search/results-modal'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { apiGet } from '@/lib/apiClient'
+import { getConfig } from '@/lib/config'
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const [resultsOpen, setResultsOpen] = React.useState(false)
@@ -22,6 +23,30 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     window.dispatchEvent(new Event('open-new-project'))
   })
   const { data: projects } = useQuery({ queryKey: ['projects'], queryFn: async () => apiGet<any[]>(`/projects`) })
+  const { data: appConfig } = useQuery({ queryKey: ['config'], queryFn: getConfig, staleTime: 60_000 })
+  const resultsEnabled = (appConfig?.RESULTS_MODAL || 0) === 1
+
+  React.useEffect(() => {
+    if (!resultsEnabled) {
+      setResultsOpen(false)
+      setResultsInitial(undefined)
+    }
+  }, [resultsEnabled])
+
+  const handleOpenResults = React.useCallback(() => {
+    if (!resultsEnabled) return
+    setResultsInitial(undefined)
+    setResultsOpen(true)
+  }, [resultsEnabled])
+
+  const handleOpenTag = React.useCallback(
+    (tag: string) => {
+      if (!resultsEnabled) return
+      setResultsInitial({ q: '', tags: [tag] })
+      setResultsOpen(true)
+    },
+    [resultsEnabled],
+  )
   return (
     <div className="grid min-h-screen grid-cols-[260px_1fr] grid-rows-[56px_1fr]">
       <header className="col-span-2 flex items-center justify-between border-b px-4">
@@ -44,22 +69,24 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <aside className="row-start-2 border-r p-3">
         <SidebarSections
           projects={projects || []}
-          onOpenResults={() => { setResultsInitial(undefined); setResultsOpen(true) }}
-          onOpenTag={(tag) => { setResultsInitial({ q: '', tags: [tag] }); setResultsOpen(true) }}
+          resultsEnabled={resultsEnabled}
+          onOpenResults={handleOpenResults}
+          onOpenTag={handleOpenTag}
         />
       </aside>
       <main className={cn('row-start-2 overflow-y-auto p-6')}>{children}</main>
-      <ResultsModal open={resultsOpen} onOpenChange={setResultsOpen} initial={resultsInitial} />
+      {resultsEnabled && (
+        <ResultsModal open={resultsOpen} onOpenChange={setResultsOpen} initial={resultsInitial} />
+      )}
     </div>
   )
 }
 
-function SidebarSections({ projects, onOpenResults, onOpenTag }: { projects: any[]; onOpenResults: () => void; onOpenTag: (tag: string) => void }) {
+function SidebarSections({ projects, resultsEnabled, onOpenResults, onOpenTag }: { projects: any[]; resultsEnabled: boolean; onOpenResults: () => void; onOpenTag: (tag: string) => void }) {
   const [openProjects, setOpenProjects] = React.useState<Record<string, boolean>>(() => {
     try { return JSON.parse(localStorage.getItem('sidebar.projects') || '{}') } catch { return {} }
   })
   React.useEffect(() => { try { localStorage.setItem('sidebar.projects', JSON.stringify(openProjects)) } catch {} }, [openProjects])
-  const qc = useQueryClient()
   function toggleProject(id: string) {
     setOpenProjects((s) => ({ ...s, [id]: !s[id] }))
   }
@@ -84,13 +111,15 @@ function SidebarSections({ projects, onOpenResults, onOpenTag }: { projects: any
           ))}
         </div>
       </div>
-      <TagsSection onOpenResults={onOpenResults} onOpenTag={onOpenTag} />
+      <TagsSection resultsEnabled={resultsEnabled} onOpenTag={onOpenTag} />
       <div>
         <div className="mb-2 flex items-center justify-between">
           <span className="text-xs uppercase text-muted-foreground">Filters</span>
         </div>
         <div className="space-y-2">
-          <Button variant="outline" size="sm" onClick={onOpenResults}>Open Advanced Filters…</Button>
+          <Button variant="outline" size="sm" onClick={resultsEnabled ? onOpenResults : undefined} disabled={!resultsEnabled} title={resultsEnabled ? undefined : 'Results modal disabled by feature flag'}>
+            Open Advanced Filters…
+          </Button>
         </div>
       </div>
     </div>
@@ -114,7 +143,7 @@ function TopLevelContents({ projectId }: { projectId: string }) {
   )
 }
 
-function TagsSection({ onOpenResults, onOpenTag }: { onOpenResults: () => void; onOpenTag: (tag: string) => void }) {
+function TagsSection({ resultsEnabled, onOpenTag }: { resultsEnabled: boolean; onOpenTag: (tag: string) => void }) {
   const [q, setQ] = React.useState('')
   const { data } = useQuery({ queryKey: ['tags', q], queryFn: async () => apiGet<any[]>(`/tags${q ? `?q=${encodeURIComponent(q)}` : ''}`) })
   return (
@@ -123,10 +152,19 @@ function TagsSection({ onOpenResults, onOpenTag }: { onOpenResults: () => void; 
       <input className="mb-2 w-full rounded border px-2 py-1 text-sm" placeholder="Filter tags…" value={q} onChange={(e) => setQ(e.target.value)} />
       <div className="space-y-1 text-sm">
         {(data || []).slice(0, 20).map((t: any) => (
-          <button key={t.name} className="w-full truncate rounded px-2 py-1 text-left hover:bg-accent" onClick={() => onOpenTag(t.name)} title={`${t.name} (${t.count})`}>
+          <button
+            key={t.name}
+            className="w-full truncate rounded px-2 py-1 text-left hover:bg-accent disabled:cursor-not-allowed disabled:text-muted-foreground"
+            onClick={() => resultsEnabled && onOpenTag(t.name)}
+            title={`${t.name} (${t.count})`}
+            disabled={!resultsEnabled}
+          >
             #{t.name} <span className="text-xs text-muted-foreground">{t.count}</span>
           </button>
         ))}
+        {!resultsEnabled && (
+          <div className="text-xs text-muted-foreground">Results modal disabled.</div>
+        )}
       </div>
     </div>
   )

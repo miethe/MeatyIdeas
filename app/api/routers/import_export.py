@@ -17,9 +17,11 @@ from ..db import SessionLocal
 from ..models import Project
 from ..schemas import ProjectExportRequest, JobEnqueueResponse
 from ..settings import settings
+from ..app_logging import get_logger
 
 
 router = APIRouter(prefix="/projects", tags=["import_export"])
+logger = get_logger(component="import_export.api")
 
 
 def get_db():
@@ -47,6 +49,7 @@ async def import_project(
     if mode not in {"zip", "files", "json", "git"}:
         raise HTTPException(status_code=400, detail={"code": "BAD_REQUEST", "message": "Unsupported mode"})
     pid = project_id
+    created_project = False
     if not pid:
         # Create a new project if not provided
         name = f"Imported {os.urandom(3).hex()}"
@@ -55,12 +58,14 @@ async def import_project(
         db.commit()
         db.refresh(p)
         pid = p.id
+        created_project = True
         # Ensure folders
         proj_dir = os.path.join(settings.data_dir, "projects", p.slug)
         os.makedirs(os.path.join(proj_dir, "files"), exist_ok=True)
         os.makedirs(os.path.join(proj_dir, "exports"), exist_ok=True)
         with open(os.path.join(proj_dir, "project.json"), "w") as fh:
             json.dump({"id": p.id, "name": p.name, "slug": p.slug, "description": p.description, "tags": p.tags, "status": p.status}, fh)
+        logger.info("import.auto_project", project_id=pid, slug=p.slug)
     # enqueue appropriate job
     q = _rq()
     if mode == "zip":
@@ -136,6 +141,14 @@ async def import_project(
             target_path=target_path,
             job_timeout=1200,
         )
+    logger.info(
+        "import.enqueue",
+        project_id=pid,
+        job_id=job.id,
+        mode=mode,
+        target_path=target_path,
+        created_project=created_project,
+    )
     return JobEnqueueResponse(job_id=job.id, result_url=None)
 
 
@@ -159,6 +172,13 @@ def export_project(project_id: str, body: ProjectExportRequest, db: Session = De
             selection=body.selection.dict() if body.selection else None,
             job_timeout=600,
         )
+    logger.info(
+        "export.enqueue",
+        project_id=project_id,
+        job_id=job.id,
+        mode=body.mode,
+        selection_provided=bool(body.selection),
+    )
     return JobEnqueueResponse(job_id=job.id, result_url=None)
 
 

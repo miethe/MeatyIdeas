@@ -141,6 +141,7 @@ def get_project_files_tree(
     p = db.get(Project, project_id)
     if not p:
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND"})
+    include_empty = 1 if int(include_empty_dirs or 0) == 1 and int(settings.dirs_persist or 0) == 1 else 0
     # Build tree from file paths and (optionally) persisted empty directories
     files = db.scalars(select(File).where(File.project_id == project_id)).all()
     root: dict = {"name": "", "path": "", "type": "dir", "children": {}}
@@ -174,7 +175,7 @@ def get_project_files_tree(
     try:
         from ..models import Directory  # local import to avoid cycles
 
-        if int(include_empty_dirs or 0) == 1:
+        if include_empty == 1:
             dirs = db.scalars(select(Directory).where(Directory.project_id == project_id)).all()
             for d in dirs:
                 parts = [seg for seg in d.path.split("/") if seg]

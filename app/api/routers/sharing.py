@@ -13,9 +13,11 @@ from ..db import SessionLocal
 from ..models import Project, ShareLink, File
 from ..schemas import ShareLinkCreate, ShareLinkRead
 from ..settings import settings
+from ..app_logging import get_logger
 
 
 router = APIRouter(tags=["sharing"])
+logger = get_logger(component="sharing.api")
 
 
 def get_db():
@@ -48,10 +50,24 @@ def create_share_link(project_id: str, body: ShareLinkCreate, db: Session = Depe
     while db.query(ShareLink).filter(ShareLink.token == token).first() is not None and tries < 5:
         token = _gen_token(16)
         tries += 1
-    sl = ShareLink(project_id=project_id, token=token, permissions="read", expires_at=body.expires_at, revoked_at=None)
+    sl = ShareLink(
+        project_id=project_id,
+        token=token,
+        permissions="read",
+        allow_export=bool(body.allow_export),
+        expires_at=body.expires_at,
+        revoked_at=None,
+    )
     db.add(sl)
     db.commit()
     db.refresh(sl)
+    logger.info(
+        "share.create",
+        project_id=project_id,
+        share_id=sl.id,
+        allow_export=sl.allow_export,
+        expires_at=sl.expires_at.isoformat() if sl.expires_at else None,
+    )
     return sl
 
 
@@ -74,6 +90,7 @@ def revoke_share_link(share_id: str, db: Session = Depends(get_db)):
     sl.revoked_at = dt.datetime.now(tz=dt.timezone.utc)
     db.add(sl)
     db.commit()
+    logger.info("share.revoke", share_id=share_id, project_id=sl.project_id)
     return
 
 
@@ -88,6 +105,8 @@ def _rate_limit_ok(ip: str, token: str) -> bool:
         n = r.incr(key)
         if n == 1:
             r.expire(key, 60)
+        if n > 120:
+            logger.warning("share.rate_limit", token_suffix=token[-6:], ip=ip)
         return n <= 120  # 120 req/min per IP per token
     except Exception:
         return True
@@ -113,7 +132,18 @@ def public_project(request: Request, token: str, db: Session = Depends(get_db)):
     p = db.get(Project, sl.project_id)
     if not p:
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND"})
-    return {"id": p.id, "name": p.name, "slug": p.slug, "description": p.description, "tags": p.tags, "status": p.status}
+    data = {
+        "id": p.id,
+        "name": p.name,
+        "slug": p.slug,
+        "description": p.description,
+        "tags": p.tags,
+        "status": p.status,
+        "allow_export": bool(sl.allow_export),
+        "expires_at": sl.expires_at.isoformat() if sl.expires_at else None,
+    }
+    logger.info("share.public.project", share_id=sl.id, token_suffix=token[-6:], ip=ip)
+    return data
 
 
 @public_router.get("/{token}/files")
@@ -126,6 +156,14 @@ def public_files(request: Request, token: str, path: str | None = None, db: Sess
     if path:
         q = q.filter(File.path.like(path.rstrip("/") + "%"))
     rows = q.with_entities(File.id, File.title, File.path).all()
+    logger.info(
+        "share.public.files",
+        share_id=sl.id,
+        token_suffix=token[-6:],
+        ip=ip,
+        path_prefix=path or "",
+        count=len(rows),
+    )
     return [{"id": r[0], "title": r[1], "path": r[2]} for r in rows]
 
 
@@ -138,5 +176,5 @@ def public_file(request: Request, token: str, path: str, db: Session = Depends(g
     f = db.query(File).filter(File.project_id == sl.project_id, File.path == path).first()
     if not f:
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND"})
+    logger.info("share.public.file", share_id=sl.id, token_suffix=token[-6:], ip=ip, path=path)
     return {"title": f.title, "path": f.path, "content": f.content_md}
-

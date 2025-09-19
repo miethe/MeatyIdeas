@@ -16,9 +16,19 @@ from ..schemas import (
     GroupAssignRequest,
     ProjectRead,
 )
+from ..settings import settings
 
 
-router = APIRouter(prefix="/project-groups", tags=["project-groups"])
+def require_groups_enabled():
+    if int(settings.groups_ui or 0) != 1:
+        raise HTTPException(status_code=404, detail={"code": "NOT_ENABLED", "message": "Groups disabled"})
+
+
+router = APIRouter(
+    prefix="/project-groups",
+    tags=["project-groups"],
+    dependencies=[Depends(require_groups_enabled)],
+)
 
 
 def get_db():
@@ -136,4 +146,3 @@ def unassign_project(project_id: str, db: Session = Depends(get_db)):
     db.delete(m)
     db.commit()
     return
-

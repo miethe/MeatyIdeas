@@ -12,7 +12,11 @@ export default function SharePage() {
   return (
     <div className="mx-auto max-w-3xl p-6">
       <h1 className="mb-1 text-2xl font-bold">{proj.data?.name || 'Shared Project'}</h1>
-      <p className="mb-4 text-muted-foreground">Read-only share</p>
+      <p className="mb-2 text-muted-foreground">Read-only share</p>
+      <div className="mb-4 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+        <span>{proj.data?.allow_export ? 'Exports enabled for this link.' : 'Exports disabled for this link.'}</span>
+        {proj.data?.expires_at && <span>Expires {new Date(proj.data.expires_at).toLocaleString()}</span>}
+      </div>
       <div className="rounded border">
         <div className="border-b p-2 text-sm font-semibold">Files</div>
         <div className="max-h-[60vh] overflow-auto p-2">
@@ -36,4 +40,3 @@ export default function SharePage() {
     </div>
   )
 }
-
