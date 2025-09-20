@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -249,6 +249,88 @@ class AppConfig(BaseModel):
     SEARCH_MODAL_V2: int = 1
     SEARCH_FILTERS_V2: int = 1
     TAGS_V2: int = 1
+    PROJECT_MODAL: int = 0
+
+
+class ProjectModalQuickStat(BaseModel):
+    id: str
+    label: str
+    value: str
+    subvalue: str | None = None
+    timestamp: dt.datetime | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ProjectModalSummary(BaseModel):
+    id: str
+    name: str
+    slug: str
+    description: str
+    status: str
+    updated_at: dt.datetime | None
+    is_starred: bool
+    tags: list[ProjectCardTag] = Field(default_factory=list)
+    owners: list[ProjectCardOwner] = Field(default_factory=list)
+    file_count: int
+    directory_count: int
+    language_mix: list[ProjectCardLanguageStat] = Field(default_factory=list)
+    readme_path: str | None = None
+    highlight: ProjectCardHighlight | None = None
+    quick_stats: list[ProjectModalQuickStat] = Field(default_factory=list)
+
+
+class ProjectTreeNode(BaseModel):
+    type: Literal['dir', 'file']
+    name: str
+    path: str
+    depth: int
+    parent_path: str | None = None
+    file_id: str | None = None
+    updated_at: dt.datetime | None = None
+    size: int | None = None
+    has_children: bool | None = None
+    children_count: int | None = None
+    preview_eligible: bool | None = None
+    badges: list[str] = Field(default_factory=list)
+    language: str | None = None
+    extension: str | None = None
+
+
+class ProjectTreeResponse(BaseModel):
+    items: list[ProjectTreeNode]
+    next_cursor: str | None = None
+    total: int = 0
+
+
+class ProjectActivityEntry(BaseModel):
+    id: str
+    type: str
+    message: str
+    timestamp: dt.datetime
+    actor: str | None = None
+    context: dict[str, Any] = Field(default_factory=dict)
+
+
+class ProjectActivityResponse(BaseModel):
+    items: list[ProjectActivityEntry]
+    next_cursor: str | None = None
+    sources: list[str] = Field(default_factory=list)
+
+
+class FilePreviewResponse(BaseModel):
+    id: str
+    project_id: str
+    path: str
+    title: str
+    size: int
+    mime_type: str | None = None
+    encoding: str = "utf-8"
+    content: str | None = None
+    rendered_html: str | None = None
+    is_truncated: bool = False
+    preview_type: str = "text"
+    language: str | None = None
+    updated_at: dt.datetime
 
 
 # Phase 2 — Repos (Git)

@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 import os
+import mimetypes
+import hashlib
+import datetime as dt
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from markdown_it import MarkdownIt
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from ..db import SessionLocal, engine
 from ..models import File, Project
-from ..schemas import FileCreate, FileRead, LinkInfo, MoveFileRequest, MoveFileDryRunResult, MoveFileApplyResult
+from ..schemas import FileCreate, FileRead, LinkInfo, MoveFileRequest, MoveFileDryRunResult, MoveFileApplyResult, FilePreviewResponse
 from ..settings import settings
 from ..utils import safe_join
 import os
@@ -39,6 +42,93 @@ md = MarkdownIt("commonmark").enable("table").enable("strikethrough")
 def render_markdown(md_text: str) -> str:
     # MVP: basic Markdown render; Mermaid/KaTeX handled on client later
     return md.render(md_text)
+
+
+_PREVIEW_MAX_BYTES = 200_000
+_TEXT_EXTENSIONS = {
+    "md",
+    "markdown",
+    "py",
+    "ts",
+    "tsx",
+    "js",
+    "jsx",
+    "json",
+    "yaml",
+    "yml",
+    "sh",
+    "css",
+    "scss",
+    "html",
+    "txt",
+    "rs",
+    "go",
+    "java",
+    "kt",
+    "swift",
+    "c",
+    "cpp",
+    "sql",
+}
+
+
+def _utc(value):
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=dt.timezone.utc)
+    return value.astimezone(dt.timezone.utc)
+
+
+def _http_datetime(value):
+    if not value:
+        return None
+    return dt.datetime.strftime(_utc(value), "%a, %d %b %Y %H:%M:%S GMT")
+
+
+def _apply_cache_headers(response: Response, signature: str, last_modified):
+    if signature:
+        response.headers["ETag"] = hashlib.md5(signature.encode("utf-8")).hexdigest()
+    lm = _http_datetime(last_modified)
+    if lm:
+        response.headers["Last-Modified"] = lm
+
+
+def _infer_language(path: str) -> str:
+    ext = path.rsplit(".", 1)[-1].lower() if "." in path else ""
+    mapping = {
+        "md": "Markdown",
+        "markdown": "Markdown",
+        "py": "Python",
+        "ts": "TypeScript",
+        "tsx": "TypeScript",
+        "js": "JavaScript",
+        "jsx": "JavaScript",
+        "json": "JSON",
+        "yaml": "YAML",
+        "yml": "YAML",
+        "sh": "Shell",
+        "css": "CSS",
+        "scss": "CSS",
+        "html": "HTML",
+        "txt": "Text",
+        "rs": "Rust",
+        "go": "Go",
+        "java": "Java",
+        "kt": "Kotlin",
+        "swift": "Swift",
+        "c": "C",
+        "cpp": "C++",
+        "sql": "SQL",
+    }
+    if ext in mapping:
+        return mapping[ext]
+    return ext.upper() if ext else "Other"
+
+
+def _looks_plain_text(value: str) -> bool:
+    snippet = value[:1000]
+    return all(ord(ch) >= 32 or ch in "\n\r\t" for ch in snippet)
 
 
 @router.post("/project/{project_id}", response_model=FileRead, status_code=201)
@@ -80,6 +170,56 @@ def get_file(file_id: str, db: Session = Depends(get_db)):
     if not f:
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND"})
     return f
+
+
+@router.get("/{file_id}/preview", response_model=FilePreviewResponse)
+def preview_file(file_id: str, response: Response, db: Session = Depends(get_db)):
+    f = db.get(File, file_id)
+    if not f:
+        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND"})
+
+    raw_content = f.content_md or ""
+    size_bytes = len(raw_content.encode("utf-8"))
+    is_truncated = size_bytes > _PREVIEW_MAX_BYTES
+    preview_content = raw_content[:_PREVIEW_MAX_BYTES] if is_truncated else raw_content
+    ext = f.path.rsplit(".", 1)[-1].lower() if "." in f.path else ""
+    language = _infer_language(f.path)
+    mime_type, _ = mimetypes.guess_type(f.path)
+
+    preview_type = "text"
+    if ext and ext not in _TEXT_EXTENSIONS and not _looks_plain_text(preview_content):
+        preview_type = "binary"
+        preview_content = None
+
+    rendered_html = f.rendered_html if language == "Markdown" else None
+
+    last_modified = _utc(f.updated_at)
+    signature_parts = [
+        f.id,
+        last_modified.isoformat() if last_modified else "",
+        str(size_bytes),
+        preview_type,
+    ]
+    signature = "|".join(signature_parts)
+
+    payload = FilePreviewResponse(
+        id=f.id,
+        project_id=f.project_id,
+        path=f.path,
+        title=f.title,
+        size=size_bytes,
+        mime_type=mime_type,
+        encoding="utf-8",
+        content=preview_content,
+        rendered_html=rendered_html,
+        is_truncated=is_truncated,
+        preview_type=preview_type,
+        language=language,
+        updated_at=last_modified or dt.datetime.now(tz=dt.timezone.utc),
+    )
+
+    _apply_cache_headers(response, signature, last_modified)
+    return payload
 
 
 @router.put("/{file_id}", response_model=FileRead)

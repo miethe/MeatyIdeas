@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     search_modal_v2: int = 1
     search_filters_v2: int = 1
     tags_v2: int = 1
+    project_modal: int = 0
 
     class Config:
         env_file = ".env"

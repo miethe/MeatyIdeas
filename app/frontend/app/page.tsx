@@ -36,6 +36,7 @@ import { Star, ExternalLink, Eye, Filter, MoreHorizontal, Trash2 } from 'lucide-
 import Link from 'next/link'
 import { toast } from 'sonner'
 import { getConfig } from '@/lib/config'
+import { ProjectDetailModal } from '@/components/projects/project-detail-modal'
 
 const BASE_VIEW_OPTIONS = [
   { id: 'all', label: 'All' },
@@ -125,7 +126,28 @@ async function fetchProjects(params: {
   if (params.cursor) search.set('cursor', params.cursor)
 
   const payload = await apiGet(`/projects?${search.toString()}`)
-  return ProjectListResponseSchema.parse(payload)
+  const parsed = ProjectListResponseSchema.safeParse(payload)
+  if (parsed.success) {
+    return parsed.data
+  }
+
+  console.error('projects response validation failed', parsed.error, payload)
+
+  const projects = Array.isArray((payload as any)?.projects)
+    ? ((payload as any).projects as unknown[])
+    : []
+
+  return {
+    projects: projects as ProjectCard[],
+    next_cursor: typeof (payload as any)?.next_cursor === 'string' ? (payload as any).next_cursor : null,
+    total: typeof (payload as any)?.total === 'number' ? (payload as any).total : projects.length,
+    limit: typeof (payload as any)?.limit === 'number' ? (payload as any).limit : 20,
+    view: typeof (payload as any)?.view === 'string' ? (payload as any).view : params.view,
+    filters:
+      (payload as any)?.filters && typeof (payload as any)?.filters === 'object'
+        ? ((payload as any).filters as Record<string, unknown>)
+        : {},
+  }
 }
 
 export default function DashboardPage() {
@@ -144,6 +166,24 @@ export default function DashboardPage() {
   const effectiveView = viewParam === 'tag' && tags.length === 0 ? 'all' : viewParam
   const { data: config } = useQuery({ queryKey: ['config'], queryFn: getConfig, staleTime: 60_000 })
   const groupsEnabled = (config?.GROUPS_UI || 0) === 1
+  const projectModalEnabled = (config?.PROJECT_MODAL || 0) === 1
+  const searchParamString = searchParams.toString()
+  const modalParam = searchParams.get('modal')
+  const modalIdParam = searchParams.get('id')
+  const [modalProjectId, setModalProjectId] = React.useState<string | null>(null)
+  const [modalOpen, setModalOpen] = React.useState(false)
+  const lastFocusRef = React.useRef<HTMLElement | null>(null)
+  const openedFromDashboardRef = React.useRef(false)
+
+  React.useEffect(() => {
+    if (projectModalEnabled && modalParam === 'project' && modalIdParam) {
+      setModalProjectId((prev) => (prev === modalIdParam ? prev : modalIdParam))
+      setModalOpen(true)
+    } else {
+      setModalOpen(false)
+      setModalProjectId(null)
+    }
+  }, [projectModalEnabled, modalParam, modalIdParam])
   const viewOptions = React.useMemo(() => {
     const base = [...BASE_VIEW_OPTIONS]
     if (groupsEnabled && !base.find((opt) => opt.id === 'groups')) {
@@ -219,7 +259,20 @@ export default function DashboardPage() {
   })
 
   const allProjects = React.useMemo(() => {
-    return projectsQuery.data?.pages.flatMap((page) => page.projects.map((p) => ProjectCardSchema.parse(p))) ?? []
+    if (!projectsQuery.data) return [] as ProjectCard[]
+    const items: ProjectCard[] = []
+    for (const page of projectsQuery.data.pages) {
+      for (const raw of page.projects) {
+        const parsed = ProjectCardSchema.safeParse(raw)
+        if (parsed.success) {
+          items.push(parsed.data)
+        } else {
+          console.error('project card validation failed', parsed.error, raw)
+          items.push(raw as ProjectCard)
+        }
+      }
+    }
+    return items
   }, [projectsQuery.data])
 
   const languageOptions = React.useMemo(() => {
@@ -378,8 +431,59 @@ export default function DashboardPage() {
     starMutation.mutate({ id: project.id, next: !project.is_starred })
   }
 
+  const closeModal = React.useCallback(() => {
+    setModalOpen(false)
+    setModalProjectId(null)
+    if (openedFromDashboardRef.current) {
+      openedFromDashboardRef.current = false
+      router.back()
+      return
+    }
+    const params = new URLSearchParams(searchParamString)
+    params.delete('modal')
+    params.delete('id')
+    const next = params.toString()
+    router.replace(next ? `${pathname}?${next}` : pathname, { scroll: false })
+  }, [pathname, router, searchParamString])
+
+  const handleModalOpenChange = React.useCallback(
+    (next: boolean) => {
+      if (!next) closeModal()
+    },
+    [closeModal]
+  )
+
+  const handleModalAfterClose = React.useCallback(() => {
+    if (lastFocusRef.current) {
+      try {
+        lastFocusRef.current.focus()
+      } catch {}
+      lastFocusRef.current = null
+    }
+  }, [])
+
+  const handleExpandFromModal = React.useCallback(
+    ({ slug }: { id: string; slug: string }) => {
+      openedFromDashboardRef.current = false
+      router.push(`/projects/${slug}`)
+    },
+    [router]
+  )
+
   const handleQuickPeek = (project: ProjectCard) => {
-    router.push(`/projects/${project.slug}?modal=project&id=${project.id}`)
+    if (!projectModalEnabled) {
+      router.push(`/projects/${project.slug}`)
+      return
+    }
+    openedFromDashboardRef.current = true
+    lastFocusRef.current = document.activeElement as HTMLElement | null
+    setModalProjectId(project.id)
+    setModalOpen(true)
+    const params = new URLSearchParams(searchParamString)
+    params.set('modal', 'project')
+    params.set('id', project.id)
+    const next = params.toString()
+    router.push(next ? `${pathname}?${next}` : `${pathname}?modal=project&id=${project.id}`, { scroll: false })
   }
 
   const handleQuickOpen = (project: ProjectCard) => {
@@ -414,50 +518,63 @@ export default function DashboardPage() {
     )
   }
 
+  const isModalVisible = modalOpen && !!modalProjectId
+
   return (
-    <AppShell sidebar={sidebar}>
-      <div className="flex flex-col gap-6">
-        <FilterBar
-          tags={tags}
-          tagLabelLookup={tagLabelLookup}
-          languages={languages}
-          languageOptions={languageOptions}
-          onRemoveTag={handleRemoveTag}
-          onAddTag={handleAddTag}
-          onToggleLanguage={handleToggleLanguage}
-          updatedPreset={updatedPreset}
-          onUpdatedChange={handleUpdatedChange}
-          owner={owner}
-          onOwnerChange={handleOwnerChange}
-          onReset={handleResetFilters}
-        />
-        <DensityControls density={density} onDensityChange={handleDensityChange} />
-        {projectsQuery.isLoading ? (
-          <ProjectGridSkeleton />
-        ) : allProjects.length === 0 ? (
-          <EmptyState onReset={handleResetFilters} />
-        ) : (
-          <ProjectGrid
-            projects={allProjects}
-            density={density}
-            onToggleStar={handleToggleStar}
-            onQuickPeek={handleQuickPeek}
-            onQuickOpen={handleQuickOpen}
+    <>
+      <AppShell sidebar={sidebar}>
+        <div className="flex flex-col gap-6">
+          <FilterBar
+            tags={tags}
+            tagLabelLookup={tagLabelLookup}
+            languages={languages}
+            languageOptions={languageOptions}
+            onRemoveTag={handleRemoveTag}
+            onAddTag={handleAddTag}
+            onToggleLanguage={handleToggleLanguage}
+            updatedPreset={updatedPreset}
+            onUpdatedChange={handleUpdatedChange}
+            owner={owner}
+            onOwnerChange={handleOwnerChange}
+            onReset={handleResetFilters}
           />
-        )}
-        {projectsQuery.hasNextPage && (
-          <div className="flex justify-center">
-            <Button
-              variant="outline"
-              onClick={() => projectsQuery.fetchNextPage()}
-              disabled={projectsQuery.isFetchingNextPage}
-            >
-              {projectsQuery.isFetchingNextPage ? 'Loading…' : 'Load more'}
-            </Button>
-          </div>
-        )}
-      </div>
-    </AppShell>
+          <DensityControls density={density} onDensityChange={handleDensityChange} />
+          {projectsQuery.isLoading ? (
+            <ProjectGridSkeleton />
+          ) : allProjects.length === 0 ? (
+            <EmptyState onReset={handleResetFilters} />
+          ) : (
+            <ProjectGrid
+              projects={allProjects}
+              density={density}
+              onToggleStar={handleToggleStar}
+              onQuickPeek={handleQuickPeek}
+              onQuickOpen={handleQuickOpen}
+            />
+          )}
+          {projectsQuery.hasNextPage && (
+            <div className="flex justify-center">
+              <Button
+                variant="outline"
+                onClick={() => projectsQuery.fetchNextPage()}
+                disabled={projectsQuery.isFetchingNextPage}
+              >
+                {projectsQuery.isFetchingNextPage ? 'Loading…' : 'Load more'}
+              </Button>
+            </div>
+          )}
+        </div>
+      </AppShell>
+      {projectModalEnabled && (
+        <ProjectDetailModal
+          projectId={modalProjectId}
+          open={isModalVisible}
+          onOpenChange={handleModalOpenChange}
+          onAfterClose={handleModalAfterClose}
+          onExpand={handleExpandFromModal}
+        />
+      )}
+    </>
   )
 }
 

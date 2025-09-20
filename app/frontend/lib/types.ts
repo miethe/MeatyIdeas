@@ -70,9 +70,97 @@ export const ProjectListResponseSchema = z.object({
   total: z.number(),
   limit: z.number(),
   view: z.string(),
-  filters: z.record(z.any()),
+  filters: z.record(z.string(), z.any()).catch({}).default({}),
 })
 export type ProjectListResponse = z.infer<typeof ProjectListResponseSchema>
+
+export const ProjectModalQuickStatSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  value: z.string(),
+  subvalue: z.string().nullable().optional(),
+  timestamp: z.string().nullable().optional(),
+  metadata: z.record(z.any()).default({}),
+})
+export type ProjectModalQuickStat = z.infer<typeof ProjectModalQuickStatSchema>
+
+export const ProjectModalSummarySchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  slug: z.string(),
+  description: z.string(),
+  status: z.string(),
+  updated_at: z.string().nullable().optional(),
+  is_starred: z.boolean().default(false),
+  tags: z.array(ProjectCardTagSchema).default([]),
+  owners: z.array(ProjectCardOwnerSchema).default([]),
+  file_count: z.number().default(0),
+  directory_count: z.number().default(0),
+  language_mix: z.array(ProjectCardLanguageStatSchema).default([]),
+  readme_path: z.string().nullable().optional(),
+  highlight: ProjectCardHighlightSchema.nullable().optional(),
+  quick_stats: z.array(ProjectModalQuickStatSchema).default([]),
+})
+export type ProjectModalSummary = z.infer<typeof ProjectModalSummarySchema>
+
+export const ProjectTreeNodeSchema = z.object({
+  type: z.enum(['dir', 'file']),
+  name: z.string(),
+  path: z.string(),
+  depth: z.number().default(0),
+  parent_path: z.string().nullable().optional(),
+  file_id: z.string().nullable().optional(),
+  updated_at: z.string().nullable().optional(),
+  size: z.number().nullable().optional(),
+  has_children: z.boolean().nullable().optional(),
+  children_count: z.number().nullable().optional(),
+  preview_eligible: z.boolean().nullable().optional(),
+  badges: z.array(z.string()).default([]),
+  language: z.string().nullable().optional(),
+  extension: z.string().nullable().optional(),
+})
+export type ProjectTreeNode = z.infer<typeof ProjectTreeNodeSchema>
+
+export const ProjectTreeResponseSchema = z.object({
+  items: z.array(ProjectTreeNodeSchema),
+  next_cursor: z.string().nullable().optional(),
+  total: z.number().default(0),
+})
+export type ProjectTreeResponse = z.infer<typeof ProjectTreeResponseSchema>
+
+export const ProjectActivityEntrySchema = z.object({
+  id: z.string(),
+  type: z.string(),
+  message: z.string(),
+  timestamp: z.string(),
+  actor: z.string().nullable().optional(),
+  context: z.record(z.any()).default({}),
+})
+export type ProjectActivityEntry = z.infer<typeof ProjectActivityEntrySchema>
+
+export const ProjectActivityResponseSchema = z.object({
+  items: z.array(ProjectActivityEntrySchema),
+  next_cursor: z.string().nullable().optional(),
+  sources: z.array(z.string()).default([]),
+})
+export type ProjectActivityResponse = z.infer<typeof ProjectActivityResponseSchema>
+
+export const FilePreviewSchema = z.object({
+  id: z.string(),
+  project_id: z.string(),
+  path: z.string(),
+  title: z.string(),
+  size: z.number(),
+  mime_type: z.string().nullable().optional(),
+  encoding: z.string().default('utf-8'),
+  content: z.string().nullable().optional(),
+  rendered_html: z.string().nullable().optional(),
+  is_truncated: z.boolean().default(false),
+  preview_type: z.string().default('text'),
+  language: z.string().nullable().optional(),
+  updated_at: z.string(),
+})
+export type FilePreview = z.infer<typeof FilePreviewSchema>
 
 export const FileSchema = z.object({
   id: z.string(),

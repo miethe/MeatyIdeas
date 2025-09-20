@@ -21,4 +21,5 @@ def get_config():
         SEARCH_MODAL_V2=int(settings.search_modal_v2 or 0),
         SEARCH_FILTERS_V2=int(settings.search_filters_v2 or 0),
         TAGS_V2=int(settings.tags_v2 or 0),
+        PROJECT_MODAL=int(settings.project_modal or 0),
     )

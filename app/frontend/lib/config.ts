@@ -10,6 +10,7 @@ export type AppConfig = {
   SEARCH_MODAL_V2: number
   SEARCH_FILTERS_V2: number
   TAGS_V2: number
+  PROJECT_MODAL: number
 }
 
 let _config: AppConfig | null = null
@@ -31,6 +32,7 @@ export async function getConfig(): Promise<AppConfig> {
       SEARCH_MODAL_V2: 1,
       SEARCH_FILTERS_V2: 1,
       TAGS_V2: 1,
+      PROJECT_MODAL: 0,
     }
   }
 }
