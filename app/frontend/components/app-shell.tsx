@@ -85,6 +85,12 @@ export function AppShell({ children, sidebar }: AppShellProps) {
               <kbd className="ml-2 hidden rounded bg-muted px-1 text-xs text-muted-foreground sm:inline">⌘K</kbd>
             </Button>
           </CommandPalette>
+          <ProjectCreateSheet>
+            <Button size="sm" className="gap-2">
+              <Plus className="h-4 w-4" />
+              <span className="hidden sm:inline">New Project</span>
+            </Button>
+          </ProjectCreateSheet>
           <ThemeToggle />
           <ProfileMenu />
         </div>
@@ -163,7 +169,24 @@ function TopLevelContents({ projectId }: { projectId: string }) {
 
 function TagsSection({ resultsEnabled, onOpenTag }: { resultsEnabled: boolean; onOpenTag: (tag: string) => void }) {
   const [q, setQ] = React.useState('')
-  const { data } = useQuery({ queryKey: ['tags', q], queryFn: async () => apiGet<any[]>(`/tags${q ? `?q=${encodeURIComponent(q)}` : ''}`) })
+  const { data } = useQuery({
+    queryKey: ['tags', q],
+    queryFn: async () => {
+      const params = new URLSearchParams()
+      params.set('limit', '200')
+      if (q) params.set('q', q)
+      const res = await apiGet<any[]>(`/filters/tags?${params.toString()}`)
+      return Array.isArray(res)
+        ? res.map((row: any) => ({
+            slug: String(row.slug || row.label || ''),
+            label: String(row.label || row.slug || ''),
+            count: Number(row.count ?? row.usage_count ?? 0),
+            color: row.color ?? null,
+          }))
+        : []
+    },
+    staleTime: 60_000,
+  })
   return (
     <div>
       <div className="mb-2 text-xs uppercase text-muted-foreground">Tags</div>
@@ -171,13 +194,13 @@ function TagsSection({ resultsEnabled, onOpenTag }: { resultsEnabled: boolean; o
       <div className="space-y-1 text-sm">
         {(data || []).slice(0, 20).map((t: any) => (
           <button
-            key={t.name}
+            key={t.slug}
             className="w-full truncate rounded px-2 py-1 text-left hover:bg-accent disabled:cursor-not-allowed disabled:text-muted-foreground"
-            onClick={() => resultsEnabled && onOpenTag(t.name)}
-            title={`${t.name} (${t.count})`}
+            onClick={() => resultsEnabled && onOpenTag(t.slug)}
+            title={`${t.label} (${t.count})`}
             disabled={!resultsEnabled}
           >
-            #{t.name} <span className="text-xs text-muted-foreground">{t.count}</span>
+            #{t.label} <span className="text-xs text-muted-foreground">{t.count}</span>
           </button>
         ))}
         {!resultsEnabled && (

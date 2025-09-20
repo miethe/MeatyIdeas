@@ -137,7 +137,7 @@ export default function DashboardPage() {
   const viewParam = searchParams.get('view') ?? 'all'
   const tags = decodeList(searchParams.get('tags'))
   const languages = decodeList(searchParams.get('languages'))
-  const owner = searchParams.get('owner') ?? 'me'
+  const owner = searchParams.get('owner') ?? 'all'
   const updatedPreset = searchParams.get('updated') ?? 'any'
   const densityParam = (searchParams.get('density') as Density | null) ?? null
 
@@ -359,7 +359,7 @@ export default function DashboardPage() {
   }
 
   const handleOwnerChange = (value: string) => {
-    updateParams({ owner: value === 'me' ? null : value })
+    updateParams({ owner: value === 'all' ? null : value })
   }
 
   const handleDensityChange = (value: Density) => {
