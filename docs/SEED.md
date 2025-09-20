@@ -13,5 +13,5 @@ Bundle preset selects both files.
 
 Manual seed:
 
-`docker compose exec api python -m api.seed`
+`docker-compose exec api python -m api.seed`
 

@@ -10,11 +10,14 @@ WORKDIR /app
 COPY requirements.txt /app/api/requirements.txt
 RUN pip install --upgrade pip && pip install -r /app/api/requirements.txt
 
+COPY alembic.ini /app/alembic.ini
 COPY . /app
 
 RUN apt-get update && apt-get install -y git
 
 EXPOSE 8000
+
+ENV PYTHONPATH=/app
 
 CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
 

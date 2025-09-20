@@ -7,8 +7,8 @@ from pathlib import Path
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-from app.api.db import Base, engine
-from app.api import models  # noqa: F401  # ensure models are imported for metadata
+from api.db import Base, engine
+from api import models  # noqa: F401  # ensure models are imported for metadata
 
 config = context.config
 

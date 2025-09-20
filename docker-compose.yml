@@ -11,7 +11,7 @@ services:
       - ./app/api:/app/api
       - ./app/cli:/app/cli
       - ./app/worker:/app/worker
-      - ./data:/data
+      - ./data:/app/api/data
     ports:
       - "8000:8000"
     healthcheck:
@@ -33,7 +33,7 @@ services:
     volumes:
       - ./app/api:/app/api
       - ./app/worker:/app/worker
-      - ./data:/data
+      - ./data:/app/api/data
 
   frontend:
     build:

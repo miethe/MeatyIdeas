@@ -6,7 +6,9 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     api_port: int = 8000
     redis_url: str = "redis://redis:6379/0"
-    data_dir: str = "/data"
+    data_dir: str = "data"  # Use relative path for local/dev and Docker.
+    # To override for local development, set DATA_DIR in your .env file or environment variables.
+    # Example: DATA_DIR=../data
     token: str = "devtoken"
     web_port: int | None = None
     otel_exporter_otlp_endpoint: str | None = None

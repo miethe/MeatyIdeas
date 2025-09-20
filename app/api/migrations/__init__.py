@@ -5,15 +5,18 @@ from pathlib import Path
 from alembic import command
 from alembic.config import Config
 
-from app.api.db import engine
+from ..db import engine
 
 
 def run_upgrade_head() -> None:
     cfg_path = Path(__file__).resolve().parents[2] / "alembic.ini"
     alembic_cfg = Config(str(cfg_path))
     alembic_cfg.set_main_option("sqlalchemy.url", str(engine.url))
-    if not alembic_cfg.get_main_option("script_location"):
-        alembic_cfg.set_main_option("script_location", "app/api/migrations")
+    # Set script_location to the actual path of this migrations folder, relative to the project root
+    migrations_path = Path(__file__).resolve().parent
+    project_root = Path(__file__).resolve().parents[2]
+    rel_migrations_path = migrations_path.relative_to(project_root)
+    alembic_cfg.set_main_option("script_location", str(rel_migrations_path))
     command.upgrade(alembic_cfg, "head")
 
 
