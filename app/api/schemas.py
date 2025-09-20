@@ -26,11 +26,69 @@ class ProjectRead(BaseModel):
     tags: list[str]
     status: str
     color: str | None
+    is_starred: bool = False
+    is_archived: bool = False
     created_at: dt.datetime
     updated_at: dt.datetime
 
     class Config:
         from_attributes = True
+
+
+class ProjectCardTag(BaseModel):
+    label: str
+    slug: str
+    color: str | None = None
+    usage_count: int | None = None
+
+
+class ProjectCardOwner(BaseModel):
+    id: str
+    name: str
+    avatar_url: str | None = None
+
+
+class ProjectCardHighlight(BaseModel):
+    title: str | None = None
+    snippet: str | None = None
+    path: str | None = None
+
+
+class ProjectCardLanguageStat(BaseModel):
+    language: str
+    count: int
+
+
+class ProjectCardRead(BaseModel):
+    id: str
+    name: str
+    slug: str
+    description: str
+    status: str
+    color: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    tag_details: list[ProjectCardTag] = Field(default_factory=list)
+    is_starred: bool = False
+    is_archived: bool = False
+    created_at: dt.datetime
+    updated_at: dt.datetime
+    file_count: int = 0
+    language_mix: list[ProjectCardLanguageStat] = Field(default_factory=list)
+    owners: list[ProjectCardOwner] = Field(default_factory=list)
+    highlight: ProjectCardHighlight | None = None
+    activity_sparkline: list[int] = Field(default_factory=list)
+
+    class Config:
+        from_attributes = True
+
+
+class ProjectListResponse(BaseModel):
+    projects: list[ProjectCardRead]
+    next_cursor: str | None = None
+    total: int = 0
+    limit: int = 0
+    view: str = "all"
+    filters: dict[str, Any] = Field(default_factory=dict)
 
 
 class FileCreate(BaseModel):

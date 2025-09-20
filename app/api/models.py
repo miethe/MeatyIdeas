@@ -31,6 +31,8 @@ class Project(Base):
     tags: Mapped[list[str]] = mapped_column(JSON, default=list)
     status: Mapped[str] = mapped_column(Enum(*StatusEnum, name="status_enum"), default="idea")
     color: Mapped[str | None] = mapped_column(String, nullable=True)
+    is_starred: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    is_archived: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     updated_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), default=now_utc, onupdate=now_utc

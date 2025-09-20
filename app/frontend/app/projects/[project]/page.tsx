@@ -32,8 +32,13 @@ export default function ProjectPage() {
   const [dirsEnabled, setDirsEnabled] = useState(false)
 
   const projList = useQuery({
-    queryKey: ['projects'],
-    queryFn: async () => apiGet<any[]>(`/projects`),
+    queryKey: ['projects-nav'],
+    queryFn: async () => {
+      const payload = await apiGet<any>(`/projects?limit=200&view=all`)
+      if (Array.isArray(payload)) return payload
+      if (payload && Array.isArray(payload.projects)) return payload.projects
+      return []
+    },
   })
 
   useEffect(() => {

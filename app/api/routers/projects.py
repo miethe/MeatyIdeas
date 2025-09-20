@@ -1,19 +1,28 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
-from typing import List
+import datetime as dt
+from typing import Dict, List
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from ..db import SessionLocal, engine
-from ..models import Project
-from ..models import File
-from ..models import ArtifactRepo
-from ..models import Bundle
-from ..schemas import ProjectCreate, ProjectRead, FileRead
+from ..models import Project, File, ArtifactRepo, Bundle, User
+from ..schemas import (
+    ProjectCreate,
+    ProjectRead,
+    ProjectCardRead,
+    ProjectCardLanguageStat,
+    ProjectCardOwner,
+    ProjectCardTag,
+    ProjectCardHighlight,
+    ProjectListResponse,
+    FileRead,
+)
 from ..settings import settings
 from ..utils import slugify
 import shutil
@@ -58,10 +67,241 @@ def create_project(body: ProjectCreate, db: Session = Depends(get_db)):
     return p
 
 
-@router.get("", response_model=List[ProjectRead])
-def list_projects(db: Session = Depends(get_db)):
-    rows = db.scalars(select(Project)).all()
-    return rows
+@router.get("", response_model=ProjectListResponse)
+def list_projects(
+    view: str | None = Query(default="all"),
+    tags: list[str] = Query(default_factory=list, alias="tags[]"),
+    language: list[str] = Query(default_factory=list, alias="language[]"),
+    owner: str | None = None,
+    updated_after: str | None = None,
+    updated_before: str | None = None,
+    sort: str | None = "-updated",
+    limit: int = 20,
+    cursor: str | None = None,
+    db: Session = Depends(get_db),
+):
+    try:
+        offset = int(cursor) if cursor else 0
+    except ValueError as exc:  # pragma: no cover - defensive
+        raise HTTPException(status_code=400, detail={"code": "BAD_CURSOR", "message": "Cursor must be integer"}) from exc
+
+    limit = max(1, min(limit, 50))
+    normalized_view = (view or "all").lower()
+
+    rows: list[Project] = db.scalars(select(Project)).all()
+
+    # Filter by archive/star view state
+    filtered: list[Project] = []
+    now = dt.datetime.now(tz=dt.timezone.utc)
+    recent_cutoff = now - dt.timedelta(days=30)
+
+    def matches_view(project: Project) -> bool:
+        if normalized_view == "archived":
+            return bool(project.is_archived)
+        archived_block = project.is_archived and normalized_view not in {"archived"}
+        if archived_block:
+            return False
+        if normalized_view == "starred":
+            return bool(project.is_starred)
+        if normalized_view in {"recent", "recently_updated"}:
+            return project.updated_at and project.updated_at >= recent_cutoff
+        return True
+
+    # Parse updated_after/before (ISO8601)
+    def parse_dt(value: str | None) -> dt.datetime | None:
+        if not value:
+            return None
+        try:
+            return dt.datetime.fromisoformat(value)
+        except ValueError:
+            raise HTTPException(status_code=400, detail={"code": "BAD_DATETIME", "message": "Invalid datetime"})
+
+    after_dt = parse_dt(updated_after)
+    before_dt = parse_dt(updated_before)
+
+    for project in rows:
+        if not matches_view(project):
+            continue
+        if tags:
+            project_tags = set([t.lower() for t in project.tags or []])
+            if not all(t.lower() in project_tags for t in tags):
+                continue
+        if after_dt and project.updated_at and project.updated_at < after_dt:
+            continue
+        if before_dt and project.updated_at and project.updated_at > before_dt:
+            continue
+        filtered.append(project)
+
+    if owner:
+        # Single-user instance: only accept owner == "me"/"local"/"default"
+        normalized_owner = owner.lower()
+        if normalized_owner not in {"me", "local", "default"}:
+            filtered = []
+
+    project_ids = [p.id for p in filtered]
+    files_by_project: Dict[str, list[File]] = {pid: [] for pid in project_ids}
+    if project_ids:
+        file_rows = db.scalars(select(File).where(File.project_id.in_(project_ids))).all()
+        for f in file_rows:
+            files_by_project.setdefault(f.project_id, []).append(f)
+
+    def detect_language(path: str) -> str:
+        ext = (path.rsplit(".", 1)[-1] if "." in path else "").lower()
+        if ext in {"md", "markdown"}:
+            return "Markdown"
+        if ext in {"py"}:
+            return "Python"
+        if ext in {"ts", "tsx"}:
+            return "TypeScript"
+        if ext in {"js", "jsx"}:
+            return "JavaScript"
+        if ext in {"json"}:
+            return "JSON"
+        if ext in {"yaml", "yml"}:
+            return "YAML"
+        if ext in {"sh"}:
+            return "Shell"
+        if ext in {"css", "scss"}:
+            return "CSS"
+        if ext in {"html"}:
+            return "HTML"
+        return ext.upper() if ext else "Other"
+
+    def build_highlight(project_files: list[File]) -> ProjectCardHighlight | None:
+        if not project_files:
+            return None
+        # Prefer README-like files
+        preferred = [f for f in project_files if f.path.lower().endswith("readme.md")]
+        target = preferred[0] if preferred else project_files[0]
+        snippet = (target.content_md or "").strip().replace("\n", " ")
+        snippet = snippet[:200] + ("…" if len(snippet) > 200 else "")
+        return ProjectCardHighlight(title=target.title, snippet=snippet or None, path=target.path)
+
+    def build_sparkline(project_files: list[File]) -> list[int]:
+        if not project_files:
+            return []
+        today = now.date()
+        buckets = [0] * 7
+        for f in project_files:
+            if not f.updated_at:
+                continue
+            delta = (today - f.updated_at.date()).days
+            if 0 <= delta < 7:
+                buckets[6 - delta] += 1
+        return buckets
+
+    # Build derived metrics for each project
+    derived: Dict[str, dict] = {}
+    for project in filtered:
+        pfiles = files_by_project.get(project.id, [])
+        lang_counts: Dict[str, int] = {}
+        for f in pfiles:
+            lang = detect_language(f.path)
+            lang_counts[lang] = lang_counts.get(lang, 0) + 1
+        lang_stats = [ProjectCardLanguageStat(language=k, count=v) for k, v in sorted(lang_counts.items(), key=lambda item: (-item[1], item[0]))]
+        derived[project.id] = {
+            "file_count": len(pfiles),
+            "language_mix": lang_stats,
+            "highlight": build_highlight(pfiles),
+            "sparkline": build_sparkline(pfiles),
+            "languages": set(lang_counts.keys()),
+        }
+
+    if language:
+        lang_targets = {lang.lower() for lang in language}
+        filtered = [
+            p
+            for p in filtered
+            if derived.get(p.id, {}).get("languages")
+            and any(lang.lower() in lang_targets for lang in derived[p.id]["languages"])
+        ]
+
+    # Sorting
+    def sort_key(project: Project):
+        if sort in {"updated", "+updated"}:
+            return project.updated_at or dt.datetime.min.replace(tzinfo=dt.timezone.utc)
+        if sort in {"name", "+name"}:
+            return project.name.lower()
+        if sort in {"-name"}:
+            return project.name.lower()
+        # Default: -updated
+        return project.updated_at or dt.datetime.min.replace(tzinfo=dt.timezone.utc)
+
+    reverse = True
+    if sort in {"name", "+name"}:
+        reverse = False
+    elif sort in {"-name"}:
+        reverse = True
+    elif sort in {"updated", "+updated"}:
+        reverse = False
+    elif sort in {"-updated", None, ""}:
+        reverse = True
+    filtered.sort(key=sort_key, reverse=reverse)
+
+    total = len(filtered)
+    page_items = filtered[offset : offset + limit]
+    next_cursor = str(offset + limit) if offset + limit < total else None
+
+    # Owners — single local user fallback
+    owners: list[ProjectCardOwner] = []
+    user_row = db.get(User, "local")
+    if user_row:
+        owners = [ProjectCardOwner(id=user_row.id, name=user_row.name, avatar_url=user_row.avatar_url)]
+    else:
+        owners = [ProjectCardOwner(id="local", name="Local User", avatar_url=None)]
+
+    def tag_hex(tag: str) -> str | None:
+        if not tag:
+            return None
+        digest = hashlib.md5(tag.encode()).hexdigest()
+        return f"#{digest[:6]}"
+
+    cards: list[ProjectCardRead] = []
+    for project in page_items:
+        lang_stats = derived.get(project.id, {}).get("language_mix", [])
+        highlight = derived.get(project.id, {}).get("highlight")
+        sparkline = derived.get(project.id, {}).get("sparkline", [])
+
+        tags_details = [
+            ProjectCardTag(label=t, slug=t, color=tag_hex(t), usage_count=None)
+            for t in (project.tags or [])
+        ]
+
+        card = ProjectCardRead(
+            id=project.id,
+            name=project.name,
+            slug=project.slug,
+            description=project.description,
+            status=project.status,
+            color=project.color,
+            tags=project.tags or [],
+            tag_details=tags_details,
+            is_starred=bool(project.is_starred),
+            is_archived=bool(project.is_archived),
+            created_at=project.created_at,
+            updated_at=project.updated_at,
+            file_count=derived.get(project.id, {}).get("file_count", 0),
+            language_mix=lang_stats,
+            owners=owners,
+            highlight=highlight,
+            activity_sparkline=sparkline,
+        )
+        cards.append(card)
+
+    return ProjectListResponse(
+        projects=cards,
+        next_cursor=next_cursor,
+        total=total,
+        limit=limit,
+        view=normalized_view,
+        filters={
+            "tags": tags,
+            "language": language,
+            "owner": owner,
+            "updated_after": updated_after,
+            "updated_before": updated_before,
+        },
+    )
 
 
 @router.get("/{project_id}", response_model=ProjectRead)
@@ -85,6 +325,54 @@ def update_project(project_id: str, body: ProjectCreate, db: Session = Depends(g
     db.commit()
     db.refresh(p)
     return p
+
+
+@router.post("/{project_id}/star", status_code=204)
+def star_project(project_id: str, db: Session = Depends(get_db)) -> Response:
+    project = db.get(Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND"})
+    if not project.is_starred:
+        project.is_starred = True
+        db.add(project)
+        db.commit()
+    return Response(status_code=204)
+
+
+@router.delete("/{project_id}/star", status_code=204)
+def unstar_project(project_id: str, db: Session = Depends(get_db)) -> Response:
+    project = db.get(Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND"})
+    if project.is_starred:
+        project.is_starred = False
+        db.add(project)
+        db.commit()
+    return Response(status_code=204)
+
+
+@router.post("/{project_id}/archive", status_code=204)
+def archive_project(project_id: str, db: Session = Depends(get_db)) -> Response:
+    project = db.get(Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND"})
+    if not project.is_archived:
+        project.is_archived = True
+        db.add(project)
+        db.commit()
+    return Response(status_code=204)
+
+
+@router.delete("/{project_id}/archive", status_code=204)
+def unarchive_project(project_id: str, db: Session = Depends(get_db)) -> Response:
+    project = db.get(Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND"})
+    if project.is_archived:
+        project.is_archived = False
+        db.add(project)
+        db.commit()
+    return Response(status_code=204)
 
 
 @router.delete("/{project_id}", status_code=204)

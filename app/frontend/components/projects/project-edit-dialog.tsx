@@ -27,7 +27,8 @@ export function ProjectEditDialog({ project, children }: { project: Project; chi
       }),
     onSuccess: () => {
       toast.success('Project updated')
-      qc.invalidateQueries({ queryKey: ['projects'] })
+      qc.invalidateQueries({ queryKey: ['projects-nav'] })
+      qc.invalidateQueries({ queryKey: ['dashboard-projects'] })
       qc.invalidateQueries({ queryKey: ['project', project.id] })
       setOpen(false)
     },
@@ -81,4 +82,3 @@ export function ProjectEditDialog({ project, children }: { project: Project; chi
     </Dialog>
   )
 }
-

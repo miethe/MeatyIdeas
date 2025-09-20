@@ -8,10 +8,71 @@ export const ProjectSchema = z.object({
   tags: z.array(z.string()),
   status: z.string(),
   color: z.string().nullable().optional(),
+  is_starred: z.boolean().optional().default(false),
+  is_archived: z.boolean().optional().default(false),
   created_at: z.string(),
   updated_at: z.string(),
 })
 export type Project = z.infer<typeof ProjectSchema>
+
+export const ProjectCardLanguageStatSchema = z.object({
+  language: z.string(),
+  count: z.number(),
+})
+export type ProjectCardLanguageStat = z.infer<typeof ProjectCardLanguageStatSchema>
+
+export const ProjectCardTagSchema = z.object({
+  label: z.string(),
+  slug: z.string(),
+  color: z.string().nullable().optional(),
+  usage_count: z.number().nullable().optional(),
+})
+export type ProjectCardTag = z.infer<typeof ProjectCardTagSchema>
+
+export const ProjectCardOwnerSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  avatar_url: z.string().nullable().optional(),
+})
+export type ProjectCardOwner = z.infer<typeof ProjectCardOwnerSchema>
+
+export const ProjectCardHighlightSchema = z.object({
+  title: z.string().nullable().optional(),
+  snippet: z.string().nullable().optional(),
+  path: z.string().nullable().optional(),
+})
+export type ProjectCardHighlight = z.infer<typeof ProjectCardHighlightSchema>
+
+export const ProjectCardSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  slug: z.string(),
+  description: z.string(),
+  status: z.string(),
+  color: z.string().nullable().optional(),
+  tags: z.array(z.string()),
+  tag_details: z.array(ProjectCardTagSchema).default([]),
+  is_starred: z.boolean().default(false),
+  is_archived: z.boolean().default(false),
+  created_at: z.string(),
+  updated_at: z.string(),
+  file_count: z.number().default(0),
+  language_mix: z.array(ProjectCardLanguageStatSchema).default([]),
+  owners: z.array(ProjectCardOwnerSchema).default([]),
+  highlight: ProjectCardHighlightSchema.nullable(),
+  activity_sparkline: z.array(z.number()).default([]),
+})
+export type ProjectCard = z.infer<typeof ProjectCardSchema>
+
+export const ProjectListResponseSchema = z.object({
+  projects: z.array(ProjectCardSchema),
+  next_cursor: z.string().nullable().optional(),
+  total: z.number(),
+  limit: z.number(),
+  view: z.string(),
+  filters: z.record(z.any()),
+})
+export type ProjectListResponse = z.infer<typeof ProjectListResponseSchema>
 
 export const FileSchema = z.object({
   id: z.string(),

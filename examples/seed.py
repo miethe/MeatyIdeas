@@ -23,7 +23,10 @@ def main() -> None:
     # Get projects
     r = S.get(f"{API}/projects")
     r.raise_for_status()
-    proj = next((p for p in r.json() if p["slug"] == "demo-idea-stream"), None)
+    data = r.json()
+    projects = data.get("projects") if isinstance(data, dict) else data
+    projects = projects or []
+    proj = next((p for p in projects if p.get("slug") == "demo-idea-stream"), None)
     if not proj:
         print("Project missing", file=sys.stderr)
         sys.exit(1)
@@ -40,4 +43,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

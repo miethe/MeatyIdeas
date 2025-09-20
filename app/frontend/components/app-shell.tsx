@@ -14,7 +14,12 @@ import { useQuery } from '@tanstack/react-query'
 import { apiGet } from '@/lib/apiClient'
 import { getConfig } from '@/lib/config'
 
-export function AppShell({ children }: { children: React.ReactNode }) {
+interface AppShellProps {
+  children: React.ReactNode
+  sidebar?: React.ReactNode
+}
+
+export function AppShell({ children, sidebar }: AppShellProps) {
   const [resultsOpen, setResultsOpen] = React.useState(false)
   const [resultsInitial, setResultsInitial] = React.useState<any | undefined>(undefined)
   useHotkeys('n', (e) => {
@@ -22,7 +27,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     e.preventDefault()
     window.dispatchEvent(new Event('open-new-project'))
   })
-  const { data: projects } = useQuery({ queryKey: ['projects'], queryFn: async () => apiGet<any[]>(`/projects`) })
+  const { data: projects } = useQuery({
+    queryKey: ['projects-nav'],
+    queryFn: async () => {
+      const payload = await apiGet<any>(`/projects?limit=100&view=all`)
+      if (Array.isArray(payload)) return payload
+      if (payload && Array.isArray(payload.projects)) return payload.projects
+      return []
+    },
+    staleTime: 10_000,
+  })
   const { data: appConfig } = useQuery({ queryKey: ['config'], queryFn: getConfig, staleTime: 60_000 })
   const resultsEnabled = (appConfig?.RESULTS_MODAL || 0) === 1
 
@@ -47,6 +61,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     },
     [resultsEnabled],
   )
+  const sidebarContent = sidebar ?? (
+    <SidebarSections
+      projects={projects || []}
+      resultsEnabled={resultsEnabled}
+      onOpenResults={handleOpenResults}
+      onOpenTag={handleOpenTag}
+    />
+  )
+
   return (
     <div className="grid min-h-screen grid-cols-[260px_1fr] grid-rows-[56px_1fr]">
       <header className="col-span-2 flex items-center justify-between border-b px-4">
@@ -67,12 +90,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       </header>
       <aside className="row-start-2 border-r p-3">
-        <SidebarSections
-          projects={projects || []}
-          resultsEnabled={resultsEnabled}
-          onOpenResults={handleOpenResults}
-          onOpenTag={handleOpenTag}
-        />
+        {sidebarContent}
       </aside>
       <main className={cn('row-start-2 overflow-y-auto p-6')}>{children}</main>
       {resultsEnabled && (
