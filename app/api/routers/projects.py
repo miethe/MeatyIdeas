@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import datetime as dt
@@ -11,7 +10,7 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from ..db import SessionLocal, engine
-from ..models import Project, File, ArtifactRepo, Bundle, User
+from ..models import Project, File, ArtifactRepo, Bundle, User, Tag
 from ..schemas import (
     ProjectCreate,
     ProjectRead,
@@ -26,6 +25,7 @@ from ..schemas import (
 from ..settings import settings
 from ..utils import slugify
 import shutil
+from ..services.tagging import get_project_tag_details, set_project_tags
 
 
 router = APIRouter(prefix="/projects", tags=["projects"])
@@ -46,8 +46,10 @@ def create_project(body: ProjectCreate, db: Session = Depends(get_db)):
     exists = db.scalar(select(Project).where(Project.slug == slug))
     if exists:
         raise HTTPException(status_code=409, detail={"code": "DUPLICATE", "message": "Project exists"})
-    p = Project(name=body.name, slug=slug, description=body.description or "", tags=body.tags, status=body.status)
+    p = Project(name=body.name, slug=slug, description=body.description or "", status=body.status)
     db.add(p)
+    db.flush()
+    set_project_tags(db, p, body.tags)
     db.commit()
     db.refresh(p)
     # Create on-disk layout
@@ -123,8 +125,10 @@ def list_projects(
         if not matches_view(project):
             continue
         if tags:
-            project_tags = set([t.lower() for t in project.tags or []])
-            if not all(t.lower() in project_tags for t in tags):
+            requested = {slugify(t) for t in tags}
+            project_tag_slugs = {t.slug for t in project.tag_entities}
+            project_tag_labels = {slugify(t.label) for t in project.tag_entities}
+            if not requested.issubset(project_tag_slugs.union(project_tag_labels)):
                 continue
         if after_dt and project.updated_at and project.updated_at < after_dt:
             continue
@@ -250,11 +254,7 @@ def list_projects(
     else:
         owners = [ProjectCardOwner(id="local", name="Local User", avatar_url=None)]
 
-    def tag_hex(tag: str) -> str | None:
-        if not tag:
-            return None
-        digest = hashlib.md5(tag.encode()).hexdigest()
-        return f"#{digest[:6]}"
+    project_tag_map = get_project_tag_details(db, [p.id for p in filtered])
 
     cards: list[ProjectCardRead] = []
     for project in page_items:
@@ -262,10 +262,16 @@ def list_projects(
         highlight = derived.get(project.id, {}).get("highlight")
         sparkline = derived.get(project.id, {}).get("sparkline", [])
 
-        tags_details = [
-            ProjectCardTag(label=t, slug=t, color=tag_hex(t), usage_count=None)
-            for t in (project.tags or [])
-        ]
+        tags_details = []
+        for tag in project_tag_map.get(project.id, []):
+            tags_details.append(
+                ProjectCardTag(
+                    label=tag.label,
+                    slug=tag.slug,
+                    color=tag.color,
+                    usage_count=None,
+                )
+            )
 
         card = ProjectCardRead(
             id=project.id,
@@ -274,7 +280,7 @@ def list_projects(
             description=project.description,
             status=project.status,
             color=project.color,
-            tags=project.tags or [],
+            tags=[tag.slug for tag in project_tag_map.get(project.id, [])],
             tag_details=tags_details,
             is_starred=bool(project.is_starred),
             is_archived=bool(project.is_archived),
@@ -319,8 +325,8 @@ def update_project(project_id: str, body: ProjectCreate, db: Session = Depends(g
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND"})
     p.name = body.name
     p.description = body.description or ""
-    p.tags = body.tags
     p.status = body.status
+    set_project_tags(db, p, body.tags)
     db.add(p)
     db.commit()
     db.refresh(p)

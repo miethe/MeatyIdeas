@@ -1,19 +1,22 @@
 from __future__ import annotations
 
+import time
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import text
-from sqlalchemy.engine import Connection
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from ..db import engine, SessionLocal
+from ..app_logging import get_logger
+from ..db import SessionLocal, engine
 from ..models import SavedSearch
 from ..schemas import SavedSearchCreate, SavedSearchRead
+from ..search import SearchQuery, get_search_service
+from ..services.tagging import get_tag_usage
 from ..settings import settings
 
 
 router = APIRouter(prefix="/search", tags=["search"])
+log = get_logger(component="search")
 
 
 def _get_db():
@@ -24,169 +27,117 @@ def _get_db():
         db.close()
 
 
-def _fts_columns(conn: Connection) -> list[str]:
-    rows = conn.exec_driver_sql("PRAGMA table_info('search_index')").fetchall()
-    return [r[1] for r in rows]
-
-
-# Detect JSON1 availability for tag filters/facets
-try:
-    with engine.connect() as _c:
-        _c.exec_driver_sql("select json('null')")
-    HAS_JSON1 = True
-except Exception:
-    HAS_JSON1 = False
+def _parse_bool(value: Any) -> bool | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return value != 0
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes"}:
+        return True
+    if text in {"0", "false", "no"}:
+        return False
+    return None
 
 
 @router.get("")
-def search(
-    q: str,
+def search(  # noqa: PLR0913 — endpoint parameters
+    q: str = "",
+    scope: str = Query(default="all"),
+    tags: list[str] = Query(default_factory=list, alias="tags[]"),
+    language: str | None = None,
+    updated_after: str | None = None,
+    updated_before: str | None = None,
+    owner: str | None = None,
+    has_readme: bool | None = Query(default=None),
     project_id: str | None = None,
     project_slug: str | None = None,
-    tag: list[str] | None = None,
-    status: str | None = None,
-    type: list[str] | None = None,
-    path_prefix: str | None = None,
-    updated_from: str | None = None,
-    updated_to: str | None = None,
-    sort: str = "score",
     limit: int = 20,
-    offset: int = 0,
+    cursor: str | None = None,
     facets: int = 0,
-) -> Any:
-    # FTS5 with snippet and basic filters. Join files/projects for metadata.
-    limit = max(1, min(limit, settings.search_max_limit))
-    if sort not in ("score", "updated_at"):
-        raise HTTPException(status_code=400, detail={"code": "BAD_SORT", "message": "Invalid sort"})
+) -> dict[str, Any]:
+    scope_normalized = scope.lower()
+    if scope_normalized not in {"all", "files", "projects"}:
+        raise HTTPException(status_code=400, detail={"code": "BAD_SCOPE", "message": "Scope must be all|files|projects"})
 
-    # Input validation: reject queries starting with '/' (invalid for FTS5)
-    if q and q.startswith("/"):
+    if q and q.strip().startswith("/"):
         raise HTTPException(status_code=400, detail={"code": "BAD_QUERY", "message": "Search query cannot start with '/'"})
 
-    sql_tmpl = (
-        """
-        SELECT f.id as file_id,
-               f.title as title,
-               f.path as path,
-               p.id as project_id,
-               snippet(search_index, {snippet_col}, '[', ']', '...', 8) as snippet,
-               bm25(search_index) as score
-        FROM search_index
-        JOIN files f ON f.id = search_index.file_id
-        JOIN projects p ON p.id = f.project_id
-        WHERE search_index MATCH :q
-        {and_project}
-        {and_status}
-        {and_tag}
-        {and_type}
-        {and_path}
-        {and_updated}
-        {order_by}
-        LIMIT :limit OFFSET :offset
-        """
+    if limit < 1 or limit > settings.search_max_limit:
+        raise HTTPException(status_code=400, detail={"code": "BAD_LIMIT", "message": "Limit out of range"})
+
+    tag_values = []
+    seen = set()
+    for tag in tags:
+        value = tag.strip()
+        if not value:
+            continue
+        if value in seen:
+            continue
+        seen.add(value)
+        tag_values.append(value)
+
+    has_readme_bool = _parse_bool(has_readme)
+    query = SearchQuery(
+        q=q or "",
+        scope=scope_normalized,  # type: ignore[arg-type]
+        tags=tag_values,
+        language=language.lower() if language else None,
+        updated_after=updated_after,
+        updated_before=updated_before,
+        owner=owner,
+        has_readme=has_readme_bool,
+        limit=limit,
+        cursor=cursor,
+        project_id=project_id,
+        project_slug=project_slug,
     )
-    and_project = ""
-    and_status = ""
-    and_tag = ""
-    and_type = ""
-    and_path = ""
-    and_updated = ""
-    params: dict[str, Any] = {"q": q, "limit": limit, "offset": offset}
-    if project_id:
-        and_project = " AND p.id = :project_id"
-        params["project_id"] = project_id
-    if project_slug:
-        and_project = " AND p.slug = :project_slug"
-        params["project_slug"] = project_slug
-    if status:
-        and_status = " AND p.status = :status"
-        params["status"] = status
-    if tag:
-        clauses = []
-        for i, t in enumerate(tag):
-            key = f"tag{i}"
-            params[key] = t
-            if HAS_JSON1:
-                clauses.append(
-                    " EXISTS (SELECT 1 FROM json_each(f.tags) je WHERE je.value = :" + key + ") "
-                )
-            else:
-                params[key + "_like"] = f"%\"{t}\"%"
-                clauses.append(" f.tags LIKE :" + key + "_like ")
-        and_tag = (" AND " + " AND ".join(clauses)) if clauses else ""
 
-    if type:
-        tclauses = []
-        for i, ext in enumerate(type):
-            key = f"ext{i}"
-            # normalize ext: allow with or without leading dot
-            v = ext.lower().lstrip('.')
-            params[key] = f"%.{v}"
-            tclauses.append(" f.path LIKE :" + key)
-        and_type = (" AND (" + " OR ".join(tclauses) + ")") if tclauses else ""
+    service = get_search_service(engine)
+    started = time.perf_counter()
+    try:
+        response = service.search(query)
+    except Exception as exc:  # pragma: no cover - defensive guard for FTS syntax
+        log.warning("search_error", error=str(exc), scope=scope_normalized)
+        raise HTTPException(status_code=400, detail={"code": "SEARCH_ERROR", "message": "Unable to execute search"}) from exc
+    elapsed_ms = (time.perf_counter() - started) * 1000
 
-    if path_prefix:
-        params["path_prefix_like"] = f"{path_prefix}%"
-        and_path = " AND f.path LIKE :path_prefix_like"
+    results_payload = [
+        {
+            "type": item.type,
+            "id": item.id,
+            "name": item.name,
+            "path": item.path,
+            "project": item.project,
+            "tags": item.tags,
+            "language": item.language,
+            "excerpt": item.excerpt,
+            "updated_at": item.updated_at,
+            "score": item.score,
+        }
+        for item in response.results
+    ]
 
-    if updated_from or updated_to:
-        if updated_from:
-            params["updated_from"] = updated_from
-        if updated_to:
-            params["updated_to"] = updated_to
-        parts = []
-        if updated_from:
-            parts.append(" f.updated_at >= :updated_from ")
-        if updated_to:
-            parts.append(" f.updated_at <= :updated_to ")
-        and_updated = " AND " + " AND ".join(parts)
+    payload: dict[str, Any] = {
+        "results": results_payload,
+        "next_cursor": response.next_cursor,
+    }
 
-    order_by = " ORDER BY score ASC, f.updated_at DESC " if sort == "score" else " ORDER BY f.updated_at DESC "
-
-    with engine.begin() as conn:
-        cols = _fts_columns(conn)
-        # choose snippet column: prefer body, fallback to content_text
-        snippet_col = 2 if ("body" in cols and "title" in cols) else 1
-        sql = sql_tmpl.format(
-            and_project=and_project,
-            and_status=and_status,
-            and_tag=and_tag,
-            order_by=order_by,
-            snippet_col=snippet_col,
-            and_type=and_type,
-            and_path=and_path,
-            and_updated=and_updated,
-        )
-        rows = conn.execute(text(sql), params).mappings().all()
-
-        facets_out: dict[str, Any] | None = None
-        if int(facets or 0) == 1:
-            # Facets: limited to current q + (project/status) filters; count tags/status across matching files (no limit/offset)
-            facets_out = {"tags": [], "status": []}
-            facet_base = (
-                "SELECT f.id as fid, p.status as status FROM search_index si "
-                "JOIN files f ON f.id = si.file_id JOIN projects p ON p.id = f.project_id "
-                "WHERE si MATCH :q {and_project} {and_status} {and_tag}"
-            ).format(and_project=and_project, and_status=and_status, and_tag=and_tag)
-            # Status facet
-            st_rows = conn.execute(text(f"SELECT status, COUNT(1) as c FROM ({facet_base}) GROUP BY status"), params).all()
-            facets_out["status"] = [{"name": r[0], "count": r[1]} for r in st_rows]
-            # Tags facet
-            if HAS_JSON1:
-                tag_rows = conn.execute(
-                    text(
-                        "SELECT je.value as tag, COUNT(1) as c FROM (" + facet_base + ") x, json_each((SELECT tags FROM files WHERE id = x.fid)) je GROUP BY je.value"
-                    ),
-                    params,
-                ).all()
-                facets_out["tags"] = [{"name": r[0], "count": r[1]} for r in tag_rows]
-            else:
-                facets_out["tags"] = []
-
-    out = [dict(r) for r in rows]
     if int(facets or 0) == 1:
-        return {"results": out, "facets": facets_out}
-    return out
+        payload["facets"] = service.get_facets(query)
+
+    log.info(
+        "search_executed",
+        scope=scope_normalized,
+        query_length=len(q or ""),
+        tag_filters=len(tag_values),
+        language=language,
+        duration_ms=round(elapsed_ms, 2),
+        result_count=len(results_payload),
+    )
+    return payload
 
 
 @router.get("/saved", response_model=list[SavedSearchRead])
@@ -214,13 +165,20 @@ def delete_saved_search(sid: str, db: Session = Depends(_get_db)):
     return
 
 
+@router.get("/facets/tags")
+def list_tag_facets(limit: int = 50) -> list[dict[str, Any]]:
+    db = SessionLocal()
+    try:
+        return get_tag_usage(db, limit=limit)
+    finally:
+        db.close()
+
+
 @router.post("/index/rebuild")
 def rebuild_index() -> dict[str, Any]:
-    # Enqueue background reindex job
     import redis as _redis
     import rq as _rq
-    from ..settings import settings as _settings
 
-    q = _rq.Queue("default", connection=_redis.from_url(_settings.redis_url))
+    q = _rq.Queue("default", connection=_redis.from_url(settings.redis_url))
     job = q.enqueue("worker.jobs.search_jobs.reindex_all", job_timeout=600)
     return {"job_id": job.id}

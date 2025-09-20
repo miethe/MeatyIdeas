@@ -9,14 +9,12 @@ from ..db import engine
 
 
 def run_upgrade_head() -> None:
-    cfg_path = Path(__file__).resolve().parents[2] / "alembic.ini"
+    cfg_path = Path(__file__).resolve().parent.parent / "alembic.ini"
     alembic_cfg = Config(str(cfg_path))
     alembic_cfg.set_main_option("sqlalchemy.url", str(engine.url))
     # Set script_location to the actual path of this migrations folder, relative to the project root
     migrations_path = Path(__file__).resolve().parent
-    project_root = Path(__file__).resolve().parents[2]
-    rel_migrations_path = migrations_path.relative_to(project_root)
-    alembic_cfg.set_main_option("script_location", str(rel_migrations_path))
+    alembic_cfg.set_main_option("script_location", str(migrations_path))
     command.upgrade(alembic_cfg, "head")
 
 

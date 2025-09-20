@@ -245,6 +245,10 @@ class AppConfig(BaseModel):
     GROUPS_UI: int = 0
     DIRS_PERSIST: int = 0
     RESULTS_MODAL: int = 1
+    SEARCH_V2: int = 1
+    SEARCH_MODAL_V2: int = 1
+    SEARCH_FILTERS_V2: int = 1
+    TAGS_V2: int = 1
 
 
 # Phase 2 — Repos (Git)

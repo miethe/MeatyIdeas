@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     groups_ui: int = 0
     dirs_persist: int = 0
     results_modal: int = 1
+    search_v2: int = 1
+    search_modal_v2: int = 1
+    search_filters_v2: int = 1
+    tags_v2: int = 1
 
     class Config:
         env_file = ".env"

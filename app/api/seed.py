@@ -4,23 +4,34 @@ import os
 
 from sqlalchemy import select
 
-from .db import SessionLocal, engine
+from .db import SessionLocal, engine, init_db
+from .migrations import run_upgrade_head
 from .models import Project, File
-from .utils import slugify
 from .search import index_file
+from .services.tagging import set_project_tags
+from .settings import settings
+from .utils import safe_join
 
 
 DEMO_NAME = "demo-idea-stream"
 
 
 def ensure_seed() -> None:
+    db_path = os.path.join(settings.data_dir, "app.sqlite3")
+    if os.environ.get("PYTEST_CURRENT_TEST") and os.path.exists(db_path):
+        os.remove(db_path)
+        engine.dispose()
+    run_upgrade_head()
+    init_db()
     db = SessionLocal()
     try:
         existing = db.scalars(select(Project).where(Project.slug == DEMO_NAME)).first()
         if existing:
             return
-        p = Project(name=DEMO_NAME, slug=DEMO_NAME, description="Demo project", tags=["demo"], status="idea")
+        p = Project(name=DEMO_NAME, slug=DEMO_NAME, description="Demo project", status="idea")
         db.add(p)
+        db.flush()
+        set_project_tags(db, p, ["demo"])
         db.commit()
         db.refresh(p)
 
@@ -60,9 +71,6 @@ def ensure_seed() -> None:
             db.refresh(f)
 
             # write to disk
-            from .settings import settings
-            from .utils import safe_join
-
             proj_dir = os.path.join(settings.data_dir, "projects", p.slug)
             os.makedirs(os.path.join(proj_dir, "files"), exist_ok=True)
             abs_path = safe_join(proj_dir, "files", path)

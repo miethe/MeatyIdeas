@@ -4,7 +4,18 @@ import datetime as dt
 import uuid
 from typing import Any
 
-from sqlalchemy import Column, String, Text, Enum, DateTime, ForeignKey, UniqueConstraint, Integer, Boolean
+from sqlalchemy import (
+    Column,
+    String,
+    Text,
+    Enum,
+    DateTime,
+    ForeignKey,
+    UniqueConstraint,
+    Integer,
+    Boolean,
+    Table,
+)
 from sqlalchemy.dialects.sqlite import JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -21,6 +32,14 @@ def now_utc() -> dt.datetime:
     return dt.datetime.now(tz=dt.timezone.utc)
 
 
+project_tags_table = Table(
+    "project_tags",
+    Base.metadata,
+    Column("project_id", String, ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True),
+    Column("tag_id", Integer, ForeignKey("tags.id", ondelete="CASCADE"), primary_key=True),
+)
+
+
 class Project(Base):
     __tablename__ = "projects"
 
@@ -28,7 +47,6 @@ class Project(Base):
     name: Mapped[str] = mapped_column(String, unique=True, nullable=False)
     slug: Mapped[str] = mapped_column(String, unique=True, nullable=False)
     description: Mapped[str] = mapped_column(Text, default="")
-    tags: Mapped[list[str]] = mapped_column(JSON, default=list)
     status: Mapped[str] = mapped_column(Enum(*StatusEnum, name="status_enum"), default="idea")
     color: Mapped[str | None] = mapped_column(String, nullable=True)
     is_starred: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
@@ -43,6 +61,16 @@ class Project(Base):
     repos: Mapped[list["Repo"]] = relationship("Repo", back_populates="project")
     # Directories relationship added in Phase 3
     directories: Mapped[list["Directory"]] = relationship("Directory", back_populates="project")
+    tag_entities: Mapped[list["Tag"]] = relationship(
+        "Tag",
+        secondary=project_tags_table,
+        back_populates="projects",
+        cascade="save-update",
+    )
+
+    @property
+    def tags(self) -> list[str]:
+        return [tag.label for tag in self.tag_entities]
 
 
 class User(Base):
@@ -198,6 +226,23 @@ class ProjectGroup(Base):
         cascade="all, delete-orphan",
         primaryjoin="ProjectGroup.id==ProjectGroupMembership.group_id",
         order_by="ProjectGroupMembership.sort_order",
+    )
+
+
+class Tag(Base):
+    __tablename__ = "tags"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    slug: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    label: Mapped[str] = mapped_column(String, nullable=False)
+    color: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+    projects: Mapped[list[Project]] = relationship(
+        "Project",
+        secondary=project_tags_table,
+        back_populates="tag_entities",
     )
 
 

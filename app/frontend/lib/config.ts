@@ -6,6 +6,10 @@ export type AppConfig = {
   GROUPS_UI: number
   DIRS_PERSIST: number
   RESULTS_MODAL: number
+  SEARCH_V2: number
+  SEARCH_MODAL_V2: number
+  SEARCH_FILTERS_V2: number
+  TAGS_V2: number
 }
 
 let _config: AppConfig | null = null
@@ -17,7 +21,16 @@ export async function getConfig(): Promise<AppConfig> {
     return _config
   } catch {
     // Fallback defaults
-    return { GIT_INTEGRATION: 0, SHARE_LINKS: 0, GROUPS_UI: 0, DIRS_PERSIST: 0, RESULTS_MODAL: 1 }
+    return {
+      GIT_INTEGRATION: 0,
+      SHARE_LINKS: 0,
+      GROUPS_UI: 0,
+      DIRS_PERSIST: 0,
+      RESULTS_MODAL: 1,
+      SEARCH_V2: 1,
+      SEARCH_MODAL_V2: 1,
+      SEARCH_FILTERS_V2: 1,
+      TAGS_V2: 1,
+    }
   }
 }
-

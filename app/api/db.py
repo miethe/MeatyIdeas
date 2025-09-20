@@ -23,12 +23,40 @@ SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False, futu
 def init_db() -> None:
     # Create FTS table if not exists
     with engine.connect() as conn:
+        cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info('search_index')").fetchall()}
+        expected = {
+            "file_id",
+            "project_id",
+            "project_slug",
+            "project_name",
+            "title",
+            "body",
+            "path",
+            "tags",
+            "language",
+            "updated_at",
+            "is_archived",
+            "project_status",
+        }
+        if cols and cols != expected:
+            conn.execute(text("DROP TABLE IF EXISTS search_index"))
+            conn.commit()
         conn.execute(
             text(
                 """
                 CREATE VIRTUAL TABLE IF NOT EXISTS search_index USING fts5(
                     file_id UNINDEXED,
-                    content_text
+                    project_id UNINDEXED,
+                    project_slug UNINDEXED,
+                    project_name UNINDEXED,
+                    title,
+                    body,
+                    path,
+                    tags,
+                    language,
+                    updated_at UNINDEXED,
+                    is_archived UNINDEXED,
+                    project_status UNINDEXED
                 );
                 """
             )

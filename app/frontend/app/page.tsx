@@ -72,6 +72,14 @@ function encodeList(values: string[]): string | null {
   return Array.from(new Set(values.map((v) => v.trim()).filter(Boolean))).join(',')
 }
 
+function slugifyTag(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+}
+
 function resolveUpdatedRange(preset: string): { updated_after?: string; updated_before?: string } {
   const now = new Date()
   if (preset === '7d') {
@@ -227,11 +235,25 @@ export default function DashboardPage() {
   const tagsQuery = useQuery({
     queryKey: ['dashboard-tags'],
     queryFn: async () => {
-      const res = await apiGet('/tags')
-      return Array.isArray(res) ? (res as Array<{ name: string; count: number }>) : []
+      const res = await apiGet('/filters/tags?limit=200')
+      if (!Array.isArray(res)) return [] as Array<{ slug: string; label: string; count: number; color?: string | null }>
+      return (res as Array<any>).map((item) => ({
+        slug: String(item.slug || item.name || ''),
+        label: String(item.label || item.name || ''),
+        count: Number(item.count ?? item.usage_count ?? 0),
+        color: item.color ?? null,
+      }))
     },
     staleTime: 60_000,
   })
+
+  const tagLabelLookup = React.useMemo(() => {
+    const map: Record<string, string> = {}
+    for (const tag of tagsQuery.data || []) {
+      if (tag.slug) map[tag.slug] = tag.label || tag.slug
+    }
+    return map
+  }, [tagsQuery.data])
 
   const groupsQuery = useQuery({
     queryKey: ['project-groups'],
@@ -319,10 +341,12 @@ export default function DashboardPage() {
   }
 
   const handleAddTag = () => {
-    const name = window.prompt('Filter by tag:')
-    if (!name) return
-    if (tags.includes(name)) return
-    updateParams({ tags: encodeList([...tags, name]), view: 'tag' })
+    const input = window.prompt('Filter by tag:')
+    if (!input) return
+    const slug = slugifyTag(input)
+    if (!slug) return
+    if (tags.includes(slug)) return
+    updateParams({ tags: encodeList([...tags, slug]), view: 'tag' })
   }
 
   const handleToggleLanguage = (lang: string) => {
@@ -395,6 +419,7 @@ export default function DashboardPage() {
       <div className="flex flex-col gap-6">
         <FilterBar
           tags={tags}
+          tagLabelLookup={tagLabelLookup}
           languages={languages}
           languageOptions={languageOptions}
           onRemoveTag={handleRemoveTag}
@@ -446,7 +471,7 @@ function DashboardSidebar({
 }: {
   activeView: string
   tags: string[]
-  availableTags: Array<{ name: string; count: number }>
+  availableTags: Array<{ slug: string; label: string; count: number }>
   onChangeView: (view: string) => void
   onSelectTag: (tag: string) => void
   viewOptions: Array<{ id: string; label: string }>
@@ -489,17 +514,17 @@ function DashboardSidebar({
         <div className="mb-2 text-xs uppercase text-muted-foreground">Top Tags</div>
         <div className="space-y-1 text-sm">
           {(availableTags || []).slice(0, 10).map((tag) => {
-            const active = tags.includes(tag.name)
+            const active = tags.includes(tag.slug)
             return (
               <button
-                key={tag.name}
+                key={tag.slug}
                 className={cn(
                   'flex w-full items-center justify-between rounded px-2 py-1 text-left transition hover:bg-accent',
                   active && 'bg-accent text-primary'
                 )}
-                onClick={() => onSelectTag(tag.name)}
+                onClick={() => onSelectTag(tag.slug)}
               >
-                <span className="truncate">#{tag.name}</span>
+                <span className="truncate">#{tag.label}</span>
                 <span className="text-xs text-muted-foreground">{tag.count}</span>
               </button>
             )
@@ -517,6 +542,7 @@ function ChevronMarker() {
 
 function FilterBar({
   tags,
+  tagLabelLookup,
   languages,
   languageOptions,
   onRemoveTag,
@@ -529,6 +555,7 @@ function FilterBar({
   onReset,
 }: {
   tags: string[]
+  tagLabelLookup: Record<string, string>
   languages: string[]
   languageOptions: string[]
   onRemoveTag: (tag: string) => void
@@ -549,14 +576,17 @@ function FilterBar({
       <Separator orientation="vertical" className="h-6" />
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-xs uppercase text-muted-foreground">Tags</span>
-        {tags.map((tag) => (
-          <Badge key={tag} variant="secondary" className="flex items-center gap-1">
-            #{tag}
-            <button className="text-xs" onClick={() => onRemoveTag(tag)} aria-label={`Remove ${tag}`}>
+        {tags.map((tag) => {
+          const label = tagLabelLookup[tag] || tag
+          return (
+            <Badge key={tag} variant="secondary" className="flex items-center gap-1">
+              #{label}
+              <button className="text-xs" onClick={() => onRemoveTag(tag)} aria-label={`Remove ${label}`}>
               ×
             </button>
-          </Badge>
-        ))}
+            </Badge>
+          )
+        })}
         <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={onAddTag}>
           Add tag
         </Button>
@@ -747,11 +777,11 @@ function ProjectCardItem({
         {updatedDate && <span>· Updated {updatedDate.toLocaleDateString()}</span>}
         <span>· {project.file_count} files</span>
       </div>
-      {project.tags.length > 0 && (
+      {project.tag_details.length > 0 && (
         <div className="mt-3 flex flex-wrap gap-2">
-          {project.tags.map((tag) => (
-            <Badge key={tag} variant="outline" className="text-xs">
-              #{tag}
+          {project.tag_details.map((tag) => (
+            <Badge key={tag.slug} variant="outline" className="text-xs">
+              #{tag.label}
             </Badge>
           ))}
         </div>

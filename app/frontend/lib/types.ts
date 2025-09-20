@@ -87,15 +87,55 @@ export const FileSchema = z.object({
 export type FileItem = z.infer<typeof FileSchema>
 
 export const SearchResultSchema = z.object({
-  type: z.enum(['project', 'file', 'artifact']).or(z.string()),
+  type: z.enum(['project', 'file']),
   id: z.string(),
-  title: z.string().optional(),
-  name: z.string().optional(),
-  slug: z.string().optional(),
-  project_id: z.string().optional(),
-  path: z.string().optional(),
+  name: z.string(),
+  path: z.string().nullable().optional(),
+  project: z
+    .object({
+      id: z.string().nullable().optional(),
+      slug: z.string().nullable().optional(),
+      name: z.string().nullable().optional(),
+    })
+    .nullable()
+    .optional(),
+  tags: z.array(z.string()).default([]),
+  language: z.string().nullable().optional(),
+  excerpt: z.string().nullable().optional(),
+  updated_at: z.string().nullable().optional(),
+  score: z.number().optional(),
 })
 export type SearchResult = z.infer<typeof SearchResultSchema>
+
+export const SearchResponseSchema = z.object({
+  results: z.array(SearchResultSchema),
+  next_cursor: z.string().nullable().optional(),
+  facets: z
+    .object({
+      tags: z
+        .array(
+          z.object({
+            label: z.string(),
+            slug: z.string(),
+            color: z.string().nullable().optional(),
+            count: z.number().optional(),
+          })
+        )
+        .optional(),
+      languages: z
+        .array(
+          z.object({
+            label: z.string(),
+            slug: z.string(),
+            count: z.number().optional(),
+          })
+        )
+        .optional(),
+    })
+    .partial()
+    .optional(),
+})
+export type SearchResponse = z.infer<typeof SearchResponseSchema>
 
 // Git Repos (Phase 2)
 export const RepoSchema = z.object({

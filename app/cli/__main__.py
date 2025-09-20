@@ -63,7 +63,9 @@ def search(
     offset: int = typer.Option(0, help="Offset"),
 ):
     cfg, s = client()
-    params: dict[str, str | int] = {"q": q, "limit": limit, "offset": offset, "sort": ("updated_at" if sort == "updated" else "score")}
+    params: dict[str, str] = {"q": q, "limit": str(limit), "scope": "files"}
+    if offset:
+        params["cursor"] = str(offset)
     if project:
         p = find_project_by_slug(s, cfg.api_base, project)
         if not p:
@@ -71,18 +73,15 @@ def search(
             raise typer.Exit(code=1)
         params["project_id"] = p["id"]
     if status:
-        params["status"] = status
-    # Repeatable tag params
-    if tag:
-        # requests can handle tuples for repeated params
-        # Build a list of tuples
-        items = list(params.items()) + [("tag", t) for t in tag]
-        r = s.get(f"{cfg.api_base}/search", params=items, data=None)
-    else:
-        r = s.get(f"{cfg.api_base}/search", params=params, data=None)
+        typer.echo("status filter not supported in search v2", err=True)
+    items = list(params.items())
+    for tval in tag or []:
+        items.append(("tags[]", tval))
+    r = s.get(f"{cfg.api_base}/search", params=items, data=None)
     r.raise_for_status()
-    for item in r.json():
-        typer.echo(f"{item['file_id']}\t{item['title']}\t{item['path']}")
+    payload = r.json()
+    for item in payload.get("results", []):
+        typer.echo(f"{item['id']}\t{item['name']}\t{item.get('path','')}")
 
 
 saved = typer.Typer(help="Saved searches")
