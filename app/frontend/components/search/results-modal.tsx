@@ -12,11 +12,11 @@ type Result = { file_id: string; title: string; path: string; project_id: string
 export function ResultsModal({ open, onOpenChange, initial }: { open: boolean; onOpenChange: (b: boolean) => void; initial?: Partial<Filters> }) {
   const [filters, setFilters] = React.useState<Filters>({ q: '', tags: [], status: undefined, sort: 'score', project_slug: undefined, path_prefix: undefined, types: [], ...initial })
 
-  const { data, fetchNextPage, hasNextPage, isFetching } = useInfiniteQuery({
+  const { data, fetchNextPage, hasNextPage, isFetching } = useInfiniteQuery<Result[], unknown>({
     queryKey: ['results', filters],
     initialPageParam: 0,
     getNextPageParam: (lastPage, all) => (lastPage.length === 50 ? all.length * 50 : undefined),
-    queryFn: async ({ pageParam }) => {
+    queryFn: async ({ pageParam }): Promise<Result[]> => {
       const usp = new URLSearchParams({ q: filters.q || '', limit: '50', offset: String(pageParam || 0), sort: filters.sort })
       if (filters.project_slug) usp.append('project_slug', filters.project_slug)
       if (filters.path_prefix) usp.append('path_prefix', filters.path_prefix)
@@ -94,7 +94,7 @@ export function ResultsModal({ open, onOpenChange, initial }: { open: boolean; o
           </div>
           <div className="flex-1 overflow-auto" onScroll={onScroll}>
             {results.map((r) => (
-              <div key={r.file_id} className="grid grid-cols-[1.2rem_2fr_2fr_1fr_1fr] items-start gap-2 px-3 py-2 hover:bg-accent">
+              <div key={r.project_id + ':' + r.file_id} className="grid grid-cols-[1.2rem_2fr_2fr_1fr_1fr] items-start gap-2 px-3 py-2 hover:bg-accent">
                 <div>
                   <input type="checkbox" checked={selected.has(r.file_id)} onChange={(e) => {
                     setSelected((prev) => {
@@ -107,7 +107,7 @@ export function ResultsModal({ open, onOpenChange, initial }: { open: boolean; o
                 </div>
                 <div className="truncate font-medium">{r.title}</div>
                 <div className="truncate text-muted-foreground">{r.path}</div>
-                <div className="truncate text-muted-foreground">{r.project_id.slice(0, 6)}</div>
+                <div className="truncate text-muted-foreground">{r.project_id ? String(r.project_id).slice(0, 6) : ""}</div>
                 <div className="truncate text-muted-foreground">—</div>
               </div>
             ))}
