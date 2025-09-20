@@ -197,16 +197,17 @@ export default function DashboardPage() {
         updated: updatedPreset,
       },
     ],
-    queryFn: ({ pageParam }) =>
+    queryFn: ({ pageParam }: { pageParam?: string }) =>
       fetchProjects({
         view: backendView,
         tags,
         languages,
         owner,
         updatedPreset,
-        cursor: pageParam as string | undefined,
+        cursor: pageParam,
       }),
     getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
+    initialPageParam: undefined,
   })
 
   const allProjects = React.useMemo(() => {
@@ -250,7 +251,7 @@ export default function DashboardPage() {
         : Array.isArray(payload)
           ? payload
           : []
-      return items.map((it) => ProjectSchema.parse(it)) as Project[]
+  return items.map((it: unknown) => ProjectSchema.parse(it)) as Project[]
     },
     enabled: isGroupsView,
   })
