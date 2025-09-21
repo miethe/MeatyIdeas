@@ -205,16 +205,18 @@ export default function DashboardPage() {
 
   const isGroupsView = groupsEnabled && effectiveView === 'groups'
 
-  const [density, setDensity] = React.useState<Density>(() => {
-    if (densityParam) return densityParam
-    if (typeof window !== 'undefined') {
+  const [density, setDensity] = React.useState<Density>('standard')
+
+  React.useEffect(() => {
+    if (!densityParam) {
       try {
         const stored = window.localStorage.getItem('dashboard.density') as Density | null
-        if (stored) return stored
+        if (stored && DENSITY_OPTIONS.some(opt => opt.id === stored)) {
+          setDensity(stored)
+        }
       } catch {}
     }
-    return 'standard'
-  })
+  }, [densityParam])
 
   React.useEffect(() => {
     if (densityParam && densityParam !== density) {

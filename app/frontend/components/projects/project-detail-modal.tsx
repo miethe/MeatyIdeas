@@ -134,8 +134,13 @@ export function ProjectDetailModal({ projectId, open, onOpenChange, onAfterClose
     queryKey: ['project-modal-summary', projectId],
     enabled: open && !!projectId,
     queryFn: async () => {
-      const data = await apiGet(`/projects/${projectId}/modal`)
-      return ProjectModalSummarySchema.parse(data)
+      try {
+        const data = await apiGet(`/projects/${projectId}/modal`)
+        return ProjectModalSummarySchema.parse(data)
+      } catch (error) {
+        console.error('Failed to load project modal summary:', error)
+        throw error
+      }
     },
     staleTime: 60_000,
   })
@@ -339,7 +344,8 @@ export function ProjectDetailModal({ projectId, open, onOpenChange, onAfterClose
           window.sessionStorage.setItem(READ_FOCUS_KEY_PREFIX + projectId, node.path)
         } catch {}
       }
-      if (activeTab !== 'preview') setActiveTab('preview')
+      if (activeTab !== 'preview') setActiveTab('preview'
+      )
     }
   }
 
@@ -481,7 +487,7 @@ export function ProjectDetailModal({ projectId, open, onOpenChange, onAfterClose
       const row = visibleRows[nextIndex]
       if (row) {
         setFocusedPath(row.node.path)
-        if (row.node.type === 'file') setSelected({ path: row.node.path, fileId: row.node.file_id || null })
+        if (row.node.type === 'file' ) setSelected({ path: row.node.path, fileId: row.node.file_id || null })
       }
     } else if (event.key === 'ArrowUp') {
       event.preventDefault()
@@ -489,7 +495,7 @@ export function ProjectDetailModal({ projectId, open, onOpenChange, onAfterClose
       const row = visibleRows[nextIndex]
       if (row) {
         setFocusedPath(row.node.path)
-        if (row.node.type === 'file') setSelected({ path: row.node.path, fileId: row.node.file_id || null })
+        if (row.node.type === 'file' ) setSelected({ path: row.node.path, fileId: row.node.file_id || null })
       }
     } else if (event.key === 'ArrowRight') {
       if (inSearchMode) return
@@ -503,7 +509,7 @@ export function ProjectDetailModal({ projectId, open, onOpenChange, onAfterClose
           const nextRow = visibleRows[nextIndex]
           if (nextRow) {
             setFocusedPath(nextRow.node.path)
-            if (nextRow.node.type === 'file') setSelected({ path: nextRow.node.path, fileId: nextRow.node.file_id || null })
+            if (nextRow.node.type === 'file' ) setSelected({ path: nextRow.node.path, fileId: nextRow.node.file_id || null })
           }
         }
       }
@@ -553,6 +559,7 @@ export function ProjectDetailModal({ projectId, open, onOpenChange, onAfterClose
               starMutation.mutate(!summaryQuery.data.is_starred)
             }}
             starPending={starMutation.isPending}
+            error={summaryQuery.error}
           />
           <div className="flex flex-1 overflow-hidden border-t">
             <aside className="flex w-80 shrink-0 flex-col border-r">
@@ -695,9 +702,10 @@ type ModalHeaderProps = {
   onExpand: () => void
   onToggleStar: () => void
   starPending: boolean
+  error?: Error | null
 }
 
-function ModalHeader({ summary, loading, onExpand, onToggleStar, starPending }: ModalHeaderProps) {
+function ModalHeader({ summary, loading, onExpand, onToggleStar, starPending, error }: ModalHeaderProps) {
   if (loading && !summary) {
     return (
       <div className="flex items-center justify-between px-6 py-4">
@@ -714,7 +722,9 @@ function ModalHeader({ summary, loading, onExpand, onToggleStar, starPending }: 
       <div className="flex items-center justify-between border-b px-6 py-4">
         <div>
           <div className="text-lg font-semibold">Project</div>
-          <div className="text-sm text-muted-foreground">Unable to load project metadata.</div>
+          <div className="text-sm text-muted-foreground">
+            {error ? `Error loading metadata: ${error.message}` : 'Unable to load project metadata.'}
+          </div>
         </div>
         <Button variant="outline" onClick={onExpand}>
           <ExternalLink className="mr-2 h-4 w-4" /> Expand
