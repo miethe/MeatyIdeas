@@ -200,7 +200,7 @@ def summarize_markdown(content: str, limit: int = 180) -> str | None:
     snippet = re.sub(r"```[\s\S]*?```", "", content)
     snippet = re.sub(r"`([^`]+)`", r"\1", snippet)
     snippet = re.sub(r"!\[[^\]]*\]\([^\)]*\)", "", snippet)
-    snippet = re.sub(r"\[[^\]]*\]\([^\)]*\)", r"\1", snippet)
+    snippet = re.sub(r"\[([^\]]*)\]\([^\)]*\)", r"\1", snippet)
     lines = [line.strip() for line in snippet.splitlines() if line.strip()]
     if not lines:
         return None
