@@ -36,7 +36,7 @@ import { Star, ExternalLink, Eye, Filter, MoreHorizontal, Trash2 } from 'lucide-
 import Link from 'next/link'
 import { toast } from 'sonner'
 import { getConfig } from '@/lib/config'
-import { ProjectDetailModal } from '@/components/projects/project-detail-modal'
+import { ProjectDetailModal } from '@/components/projects/project-detail-modal/index'
 
 const BASE_VIEW_OPTIONS = [
   { id: 'all', label: 'All' },
