@@ -101,24 +101,20 @@ Out of scope
 
 ## 11) Rollout Strategy
 
-1. Ship behind `FILE_UPLOAD_V2` flag; enable internal tenants first.
-2. Run stress test with synthetic 500-file upload to validate concurrency.
-3. Collect usability feedback from design partners; adjust hover states / discoverability.
-4. Gradually roll out to 25%, 50%, 100% of orgs while monitoring failure metrics.
-5. Publish release notes and updated onboarding video.
+1. Immediate rollout, as app is still in active development.
 
 ## 12) Dependencies & Coordination
 
+- You have the full-stack expertise and design prowess for end-to-end ownership of this feature.
 - Requires design system updates for drop zones, progress toasts, and draggable list rows.
-- Coordinate with infra for storage quota enforcement and antivirus integration.
-- QA needs multi-browser matrix (Chrome, Safari, Edge) for drag-and-drop behaviour.
-- Support team requires updated troubleshooting scripts for stuck uploads.
+- Coordinate for storage quota enforcement and antivirus integration.
+- Consider multi-browser matrix (Chrome, Safari, Edge) for drag-and-drop behaviour.
 
 ## 13) Open Questions
 
-1. Do we enforce per-project storage quotas at upload time or allow overflow with warning?
-2. Should uploads default to current folder even if tree focus differs from list selection? (Proposed: follow primary list context.)
-3. Do we surface checksum validation for files? (Optional; consider for future reliability improvements.)
+1. Do we enforce per-project storage quotas at upload time or allow overflow with warning? A: Enforce at upload time.
+2. Should uploads default to current folder even if tree focus differs from list selection? (Proposed: follow primary list context.) A: Yes, follow primary list context.
+3. Do we surface checksum validation for files? A: Yes, surface checksum validation.
 
 ## 14) Risks & Mitigations
 

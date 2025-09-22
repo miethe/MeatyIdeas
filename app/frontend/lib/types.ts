@@ -38,6 +38,14 @@ export const ProjectCardTagSchema = z.object({
 })
 export type ProjectCardTag = z.infer<typeof ProjectCardTagSchema>
 
+export const FileTagSchema = z.object({
+  label: z.string(),
+  slug: z.string(),
+  color: z.string().nullable().optional(),
+  emoji: z.string().nullable().optional(),
+})
+export type FileTag = z.infer<typeof FileTagSchema>
+
 export const ProjectCardOwnerSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -129,6 +137,8 @@ export const ProjectTreeNodeSchema = z.object({
   badges: z.array(z.string()).default([]),
   language: z.string().nullable().optional(),
   extension: z.string().nullable().optional(),
+  icon_hint: z.string().nullable().optional(),
+  tags: z.array(FileTagSchema).default([]),
 })
 export type ProjectTreeNode = z.infer<typeof ProjectTreeNodeSchema>
 

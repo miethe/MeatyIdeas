@@ -94,23 +94,17 @@ Out of scope
 
 ## 11) Rollout Strategy
 
-1. Implement behind `FILE_TAG_VISIBILITY` flag.
-2. A/B test layout variants (tag color intensity) with internal users.
-3. Run accessibility audit (axe, manual screen reader pass) before GA.
-4. Stage release with limited cohort; monitor telemetry before 100% rollout.
+1. Immediate rollout, as app is still in active development.
 
 ## 12) Dependencies & Coordination
 
-- Coordination with design system team for icon assets and chip styling guidelines.
-- Backend support to expose tags in existing file endpoints.
-- QA scenarios for responsive behaviour, theming, and localization (if applicable).
-- Support update to highlight new filtering behaviour in help center.
+- None; you have the full-stack expertise and design prowess for end-to-end ownership of this feature.
 
 ## 13) Open Questions
 
-1. Should tag chips display emoji/iconography if provided in tag metadata?
-2. Do we allow inline edit (rename tag) in tooltip? (Recommendation: defer to tag management project.)
-3. How do we handle extremely long tag labels? (Proposal: max width + ellipsis with tooltip.)
+1. Should tag chips display emoji/iconography if provided in tag metadata? A: Yes, if it fits within design constraints.
+2. Do we allow inline edit (rename tag) in tooltip? (Recommendation: defer to tag management project.) A: No, out of scope for now.
+3. How do we handle extremely long tag labels? (Proposal: max width + ellipsis with tooltip.) A: Yes, truncate with tooltip.
 
 ## 14) Risks & Mitigations
 

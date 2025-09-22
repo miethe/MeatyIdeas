@@ -289,6 +289,13 @@ class ProjectModalSummary(BaseModel):
     groups: list["ProjectGroupRead"] = Field(default_factory=list)
 
 
+class TagSummary(BaseModel):
+    slug: str
+    label: str
+    color: str | None = None
+    emoji: str | None = None
+
+
 class ProjectTreeNode(BaseModel):
     type: Literal['dir', 'file']
     name: str
@@ -304,6 +311,8 @@ class ProjectTreeNode(BaseModel):
     badges: list[str] = Field(default_factory=list)
     language: str | None = None
     extension: str | None = None
+    icon_hint: str | None = None
+    tags: list[TagSummary] = Field(default_factory=list)
 
 
 class ProjectTreeResponse(BaseModel):

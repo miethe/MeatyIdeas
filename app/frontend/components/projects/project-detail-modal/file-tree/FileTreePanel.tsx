@@ -1,12 +1,14 @@
 import * as React from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { ChevronDown, ChevronRight, FileText, Loader2, Search } from 'lucide-react'
+import { ChevronDown, ChevronRight, Loader2, Search } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/skeleton'
 import { cn } from '@/lib/utils'
 import { ProjectTreeNode } from '@/lib/types'
+import { FileIcon } from '@/components/files/file-icon'
+import { OverflowTagChip, TagChip } from '@/components/tags/tag-chip'
 
 import { TREE_ROW_HEIGHT } from '../constants'
 import { TreeSelection, VisibleTreeRow } from '../types'
@@ -87,11 +89,10 @@ export function FileTreePanel({
               const isFocused = focusedPath === node.path
               const isSelected = selected?.path === node.path
               const selectNode = searchResults ? () => onSearchResultSelect(node) : () => onNodeClick(node)
-              const icon = node.type === 'dir'
-                ? expandedPaths.has(node.path)
-                  ? <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                  : <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                : <FileText className="h-4 w-4 text-muted-foreground" />
+              const isDirectory = node.type === 'dir'
+              const isExpanded = isDirectory && expandedPaths.has(node.path)
+              const visibleTags = node.type === 'file' ? node.tags?.slice(0, 3) ?? [] : []
+              const overflowTags = node.type === 'file' && node.tags && node.tags.length > 3 ? node.tags.slice(3) : []
 
               return (
                 <div
@@ -116,12 +117,47 @@ export function FileTreePanel({
                   onClick={() => selectNode()}
                 >
                   <div style={{ width: row.depth * 12 }} />
-                  {icon}
-                  <span className="truncate">{node.name}</span>
-                  {node.badges?.includes('readme') && (
-                    <Badge variant="secondary" className="ml-1 text-[10px] uppercase">
-                      README
-                    </Badge>
+                  {isDirectory ? (
+                    <button
+                      type="button"
+                      className="flex h-6 w-6 items-center justify-center rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        selectNode()
+                      }}
+                      aria-label={isExpanded ? 'Collapse folder' : 'Expand folder'}
+                    >
+                      {isExpanded ? (
+                        <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                      ) : (
+                        <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                      )}
+                    </button>
+                  ) : (
+                    <span className="h-6 w-6" aria-hidden />
+                  )}
+                  <FileIcon
+                    type={node.type}
+                    hint={node.icon_hint || node.extension}
+                    extension={node.extension}
+                    expanded={isExpanded}
+                    className={cn(isSelected && 'brightness-110')}
+                  />
+                  <span className="min-w-0 flex-1 truncate">
+                    {node.name}
+                    {node.badges?.includes('readme') && (
+                      <Badge variant="secondary" className="ml-2 align-middle text-[10px] uppercase">
+                        README
+                      </Badge>
+                    )}
+                  </span>
+                  {visibleTags.length > 0 && (
+                    <div className="ml-2 flex max-w-[45%] flex-shrink-0 items-center gap-1 overflow-hidden">
+                      {visibleTags.map((tag) => (
+                        <TagChip key={tag.slug} tag={tag} maxWidth={120} />
+                      ))}
+                      {overflowTags.length > 0 && <OverflowTagChip overflow={overflowTags} />}
+                    </div>
                   )}
                 </div>
               )

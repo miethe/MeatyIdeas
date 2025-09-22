@@ -31,6 +31,7 @@ from ..schemas import (
     ProjectModalQuickStat,
     ProjectTreeResponse,
     ProjectTreeNode,
+    TagSummary,
     ProjectActivityResponse,
     ProjectActivityEntry,
     ProjectGroupRead,
@@ -295,6 +296,7 @@ def _gather_modal_summary(db: Session, project: Project) -> Tuple[ProjectModalSu
     files: List[File] = (
         db.scalars(select(File).where(File.project_id == project.id)).all()
     )
+
     files.sort(key=lambda f: (_utc(f.updated_at) or dt.datetime.min.replace(tzinfo=dt.timezone.utc)), reverse=True)
     files.sort(key=lambda f: (f.updated_at or dt.datetime.min.replace(tzinfo=dt.timezone.utc)), reverse=True)
     directory_paths = _collect_directory_paths(db, project.id, files)
@@ -424,6 +426,21 @@ def _compute_tree_nodes(
     files: List[File] = (
         db.scalars(select(File).where(File.project_id == project.id)).all()
     )
+
+    tag_slugs: set[str] = set()
+    for file in files:
+        for raw_tag in file.tags or []:
+            if not raw_tag:
+                continue
+            slug = slugify(raw_tag)
+            if slug:
+                tag_slugs.add(slug)
+
+    tag_lookup: dict[str, Tag] = {}
+    if tag_slugs:
+        tag_rows = db.scalars(select(Tag).where(Tag.slug.in_(tag_slugs))).all()
+        tag_lookup = {tag.slug: tag for tag in tag_rows}
+
     directory_paths = _collect_directory_paths(db, project.id, files)
 
     latest_file = files[0] if files else None
@@ -488,6 +505,33 @@ def _compute_tree_nodes(
         badges: list[str] = []
         if parts and parts[-1].lower() in _README_BASENAMES:
             badges.append("readme")
+        mime_type, _ = mimetypes.guess_type(f.path)
+        raw_tags = f.tags or []
+        tag_details: list[TagSummary] = []
+        for raw_tag in raw_tags:
+            if not raw_tag:
+                continue
+            slug = slugify(raw_tag) or raw_tag
+            tag = tag_lookup.get(slug)
+            if tag:
+                tag_details.append(
+                    TagSummary(
+                        slug=tag.slug,
+                        label=tag.label,
+                        color=tag.color,
+                        emoji=getattr(tag, "emoji", None),
+                    )
+                )
+            else:
+                tag_details.append(
+                    TagSummary(
+                        slug=slug,
+                        label=str(raw_tag),
+                        color=None,
+                        emoji=None,
+                    )
+                )
+
         node = ProjectTreeNode(
             type="file",
             name=parts[-1] if parts else f.title,
@@ -501,6 +545,8 @@ def _compute_tree_nodes(
             badges=badges,
             language=_infer_language(f.path),
             extension=ext or None,
+            icon_hint=(ext or None) or mime_type,
+            tags=tag_details,
         )
         nodes.append(node)
 
