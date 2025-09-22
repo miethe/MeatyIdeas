@@ -70,7 +70,7 @@ export const ProjectListResponseSchema = z.object({
   total: z.number(),
   limit: z.number(),
   view: z.string(),
-  filters: z.record(z.string(), z.any()).catch({}).default({}),
+  filters: z.record(z.string(), z.unknown()).catch({}).default({}),
 })
 export type ProjectListResponse = z.infer<typeof ProjectListResponseSchema>
 
@@ -80,7 +80,7 @@ export const ProjectModalQuickStatSchema = z.object({
   value: z.string(),
   subvalue: z.string().nullable().optional(),
   timestamp: z.string().nullable().optional(),
-  metadata: z.record(z.any()).default({}),
+  metadata: z.record(z.string(), z.unknown()).default({}),
 })
 export type ProjectModalQuickStat = z.infer<typeof ProjectModalQuickStatSchema>
 
@@ -134,7 +134,7 @@ export const ProjectActivityEntrySchema = z.object({
   message: z.string(),
   timestamp: z.string(),
   actor: z.string().nullable().optional(),
-  context: z.record(z.any()).default({}),
+  context: z.record(z.string(), z.unknown()).default({}),
 })
 export type ProjectActivityEntry = z.infer<typeof ProjectActivityEntrySchema>
 

@@ -1,10 +1,14 @@
 "use client"
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import React, { useState, useEffect, useRef, useMemo } from 'react'
+import { Bold, Code, Code2, Heading1, Heading2, Heading3, Image as ImageIcon, Italic, Link as LinkIcon, List, ListChecks, ListOrdered, Minus, Quote, Strikethrough, Table as TableIcon } from 'lucide-react'
+import { toast } from 'sonner'
+
 import { Button } from '@/components/ui/button'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { Separator } from '@/components/ui/separator'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { apiGet, apiJson } from '@/lib/apiClient'
 import { FileItem, FileSchema } from '@/lib/types'
-import { toast } from 'sonner'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 
 type Props = {
   projectId: string
@@ -16,6 +20,41 @@ const templates: Record<string, string> = {
   Checklist: `# Checklist\n\n- [ ] Task 1\n- [ ] Task 2\n`,
   Mermaid: '```mermaid\nsequenceDiagram\nA->>B: Hello\n```\n',
   KaTeX: 'Inline math: $a^2 + b^2 = c^2$\n',
+  Table: `| Column 1 | Column 2 | Column 3 |\n| --- | --- | --- |\n| Row 1 | Value | Value |\n`,
+}
+
+type ToolbarButtonProps = {
+  icon: React.ComponentType<{ className?: string }>
+  label: string
+  onClick: () => void
+  shortcut?: string
+  disabled?: boolean
+}
+
+function ToolbarButton({ icon: Icon, label, onClick, shortcut, disabled }: ToolbarButtonProps) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8"
+          onClick={onClick}
+          aria-label={label}
+          disabled={disabled}
+        >
+          <Icon className="h-4 w-4" />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>
+        <div className="flex items-center gap-2">
+          <span>{label}</span>
+          {shortcut ? <span className="text-muted-foreground">{shortcut}</span> : null}
+        </div>
+      </TooltipContent>
+    </Tooltip>
+  )
 }
 
 export function RichEditor({ projectId, fileId }: Props) {
@@ -30,6 +69,10 @@ export function RichEditor({ projectId, fileId }: Props) {
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [lastSaved, setLastSaved] = useState<{ title: string; path: string; content: string } | null>(null)
+  const metaKeyLabel = useMemo(() => {
+    if (typeof window === 'undefined') return 'Ctrl+'
+    return /Mac|iPhone|iPad|iPod/.test(window.navigator.platform) ? '⌘' : 'Ctrl+'
+  }, [])
 
   useEffect(() => {
     async function load() {
@@ -107,7 +150,7 @@ export function RichEditor({ projectId, fileId }: Props) {
     return () => window.removeEventListener('keydown', onKey)
   }, [file, title, path, content, rewrite])
 
-  function insertAtCursor(snippet: string) {
+  function insertAtCursor(snippet: string, cursorOffset?: number) {
     const el = inputRef.current
     if (!el) return
     const start = el.selectionStart || 0
@@ -117,7 +160,9 @@ export function RichEditor({ projectId, fileId }: Props) {
     const next = before + snippet + after
     setContent(next)
     requestAnimationFrame(() => {
-      el.selectionStart = el.selectionEnd = start + snippet.length
+      const offset = typeof cursorOffset === 'number' ? cursorOffset : snippet.length
+      const cursor = start + offset
+      el.selectionStart = el.selectionEnd = cursor
       el.focus()
     })
   }
@@ -125,32 +170,208 @@ export function RichEditor({ projectId, fileId }: Props) {
   function wrapSelection(prefix: string, suffix?: string) {
     const el = inputRef.current
     if (!el) return
-    const start = el.selectionStart || 0
-    const end = el.selectionEnd || 0
-    const sel = content.slice(start, end)
+    const start = el.selectionStart ?? 0
+    const end = el.selectionEnd ?? 0
     const sfx = suffix ?? prefix
-    const next = content.slice(0, start) + prefix + sel + sfx + content.slice(end)
-    setContent(next)
+    const value = content
+    const selected = value.slice(start, end)
+
+    const hasWrap =
+      start >= prefix.length &&
+      end + sfx.length <= value.length &&
+      value.slice(start - prefix.length, start) === prefix &&
+      value.slice(end, end + sfx.length) === sfx
+
+    if (hasWrap) {
+      const nextValue = value.slice(0, start - prefix.length) + selected + value.slice(end + sfx.length)
+      setContent(nextValue)
+      requestAnimationFrame(() => {
+        const cursorStart = start - prefix.length
+        const cursorEnd = cursorStart + selected.length
+        el.selectionStart = cursorStart
+        el.selectionEnd = cursorEnd
+        el.focus()
+      })
+      return
+    }
+
+    const nextValue = value.slice(0, start) + prefix + selected + sfx + value.slice(end)
+    setContent(nextValue)
     requestAnimationFrame(() => {
-      el.selectionStart = start + prefix.length
-      el.selectionEnd = start + prefix.length + sel.length
+      const cursorStart = start + prefix.length
+      const cursorEnd = cursorStart + selected.length
+      el.selectionStart = cursorStart
+      el.selectionEnd = cursorEnd
       el.focus()
     })
   }
 
-  function prefixLines(prefix: string) {
+  function toggleLinePrefix(prefix: string) {
     const el = inputRef.current
     if (!el) return
-    const start = el.selectionStart || 0
-    const end = el.selectionEnd || 0
-    const before = content.slice(0, start)
-    const sel = content.slice(start, end)
-    const after = content.slice(end)
-    const toPrefix = sel || content
-    const lines = (sel ? toPrefix : content).split('\n')
-    const selected = lines.map((l, i) => (l.length ? `${prefix}${l}` : `${prefix}`)).join('\n')
-    const next = sel ? before + selected + after : selected
-    setContent(next)
+    const start = el.selectionStart ?? 0
+    const end = el.selectionEnd ?? 0
+    const value = content
+    const selectionEmpty = start === end
+
+    const blockStart = selectionEmpty ? value.lastIndexOf('\n', start - 1) + 1 : start
+    const blockEndIndex = selectionEmpty ? value.indexOf('\n', end) : end
+    const blockEnd = blockEndIndex === -1 || blockEndIndex === undefined ? value.length : blockEndIndex
+    const target = value.slice(blockStart, blockEnd)
+
+    const lines = target.split('\n')
+    const updated = lines
+      .map((line) => {
+        const leading = line.match(/^\s*/)?.[0] ?? ''
+        const trimmed = line.slice(leading.length)
+        if (!trimmed.length) {
+          return leading + prefix
+        }
+        if (trimmed.startsWith(prefix)) {
+          return leading + trimmed.slice(prefix.length)
+        }
+        return leading + prefix + trimmed
+      })
+      .join('\n')
+
+    const nextValue = value.slice(0, blockStart) + updated + value.slice(blockEnd)
+    setContent(nextValue)
+    requestAnimationFrame(() => {
+      const delta = updated.length - target.length
+      el.selectionStart = blockStart
+      el.selectionEnd = blockEnd + delta
+      el.focus()
+    })
+  }
+
+  function setHeading(level: 1 | 2 | 3) {
+    const el = inputRef.current
+    if (!el) return
+    const value = content
+    const start = el.selectionStart ?? 0
+    const end = el.selectionEnd ?? 0
+    const selectionEmpty = start === end
+    const lineStart = value.lastIndexOf('\n', start - 1) + 1
+    const lineEndIndex = value.indexOf('\n', end)
+    const lineEnd = lineEndIndex === -1 ? value.length : lineEndIndex
+    const line = value.slice(lineStart, lineEnd)
+    const cleaned = line.replace(/^#{1,6}\s*/, '')
+    const prefix = `${'#'.repeat(level)} `
+    const alreadyHeading = line.startsWith(prefix)
+    const nextLine = alreadyHeading ? cleaned : cleaned.length ? `${prefix}${cleaned}` : prefix
+    const nextValue = value.slice(0, lineStart) + nextLine + value.slice(lineEnd)
+    setContent(nextValue)
+    requestAnimationFrame(() => {
+      const headingLength = nextLine.match(/^#{1,6}\s*/)?.[0]?.length ?? 0
+      const textStart = lineStart + headingLength
+      const textEnd = textStart + cleaned.length
+      if (selectionEmpty) {
+        el.selectionStart = textEnd
+        el.selectionEnd = textEnd
+      } else {
+        el.selectionStart = textStart
+        el.selectionEnd = textEnd
+      }
+      el.focus()
+    })
+  }
+
+  function toggleList(mode: 'bullet' | 'ordered' | 'task') {
+    const el = inputRef.current
+    if (!el) return
+    const value = content
+    const start = el.selectionStart ?? 0
+    const end = el.selectionEnd ?? 0
+    const selectionEmpty = start === end
+
+    const blockStart = selectionEmpty ? value.lastIndexOf('\n', start - 1) + 1 : start
+    const blockEndIndex = selectionEmpty ? value.indexOf('\n', end) : end
+    const blockEnd = blockEndIndex === -1 || blockEndIndex === undefined ? value.length : blockEndIndex
+    const target = value.slice(blockStart, blockEnd)
+    const lines = target.split('\n')
+
+    const updated = lines
+      .map((line) => {
+        if (!line.trim().length) return line
+        const leading = line.match(/^\s*/)?.[0] ?? ''
+        const trimmed = line.slice(leading.length)
+        if (mode === 'bullet') {
+          if (/^[-*+]\s+/.test(trimmed)) {
+            return leading + trimmed.replace(/^[-*+]\s+/, '')
+          }
+          return leading + `- ${trimmed}`
+        }
+        if (mode === 'ordered') {
+          if (/^\d+\.\s+/.test(trimmed)) {
+            return leading + trimmed.replace(/^\d+\.\s+/, '')
+          }
+          return leading + `1. ${trimmed}`
+        }
+        // task list
+        if (/^[-*+]\s+\[[ xX]\]\s+/.test(trimmed)) {
+          return leading + trimmed.replace(/^[-*+]\s+\[[ xX]\]\s+/, '')
+        }
+        return leading + `- [ ] ${trimmed}`
+      })
+      .join('\n')
+
+    const nextValue = value.slice(0, blockStart) + updated + value.slice(blockEnd)
+    setContent(nextValue)
+    requestAnimationFrame(() => {
+      const delta = updated.length - target.length
+      el.selectionStart = blockStart
+      el.selectionEnd = blockEnd + delta
+      el.focus()
+    })
+  }
+
+  function insertLink() {
+    const el = inputRef.current
+    if (!el) return
+    const start = el.selectionStart ?? 0
+    const end = el.selectionEnd ?? 0
+    const value = content
+    const selected = value.slice(start, end)
+    const label = selected || 'link text'
+    const url = prompt('Link URL:', 'https://')
+    if (!url) return
+    const replacement = `[${label}](${url})`
+    const nextValue = value.slice(0, start) + replacement + value.slice(end)
+    setContent(nextValue)
+    requestAnimationFrame(() => {
+      if (selected) {
+        const urlStart = start + label.length + 3
+        const urlEnd = urlStart + url.length
+        el.selectionStart = urlStart
+        el.selectionEnd = urlEnd
+      } else {
+        const labelStart = start + 1
+        const labelEnd = labelStart + label.length
+        el.selectionStart = labelStart
+        el.selectionEnd = labelEnd
+      }
+      el.focus()
+    })
+  }
+
+  function insertImage() {
+    const alt = prompt('Image alt text:', '')
+    if (alt === null) return
+    const url = prompt('Image URL:', 'https://')
+    if (!url) return
+    insertAtCursor(`![${alt || 'image'}](${url})`)
+  }
+
+  function insertCodeBlock() {
+    insertAtCursor('\n\n```\n\n```\n', 6)
+  }
+
+  function insertHorizontalRule() {
+    insertAtCursor('\n\n---\n\n')
+  }
+
+  function insertTableSnippet() {
+    insertAtCursor('\n\n| Column 1 | Column 2 | Column 3 |\n| --- | --- | --- |\n| Row 1 | Value | Value |\n')
   }
 
   async function onUpload(e: React.ChangeEvent<HTMLInputElement>) {
@@ -236,30 +457,39 @@ export function RichEditor({ projectId, fileId }: Props) {
           </div>
 
           {/* Toolbar 2: Formatting */}
-          <div className="flex flex-wrap items-center gap-2">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="secondary">Formatting</Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start">
-                <DropdownMenuLabel>Inline</DropdownMenuLabel>
-                <DropdownMenuItem onSelect={() => wrapSelection('**')}>Bold</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => wrapSelection('*')}>Italic</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => wrapSelection('~~')}>Strikethrough</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => wrapSelection('`')}>Inline code</DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuLabel>Blocks</DropdownMenuLabel>
-                <DropdownMenuItem onSelect={() => insertAtCursor('\n\n```\n\n```\n')}>Code block</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => prefixLines('# ')}>H1</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => prefixLines('## ')}>H2</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => prefixLines('### ')}>H3</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => prefixLines('> ')}>Quote</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => prefixLines('- ')}>Bulleted list</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => prefixLines('1. ')}>Numbered list</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => insertAtCursor('\n\n---\n\n')}>Horizontal rule</DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
+          <TooltipProvider delayDuration={120}>
+            <div className="overflow-x-auto">
+              <div className="flex w-max flex-wrap items-center gap-2 rounded-md border bg-muted/40 p-2 shadow-sm">
+                <div className="flex items-center gap-1">
+                  <ToolbarButton icon={Bold} label="Bold" onClick={() => wrapSelection('**')} shortcut={`${metaKeyLabel}B`} />
+                  <ToolbarButton icon={Italic} label="Italic" onClick={() => wrapSelection('*')} shortcut={`${metaKeyLabel}I`} />
+                  <ToolbarButton icon={Strikethrough} label="Strikethrough" onClick={() => wrapSelection('~~')} />
+                  <ToolbarButton icon={Code} label="Inline code" onClick={() => wrapSelection('`')} />
+                </div>
+                <Separator orientation="vertical" className="hidden h-6 sm:block" />
+                <div className="flex items-center gap-1">
+                  <ToolbarButton icon={Heading1} label="Heading 1" onClick={() => setHeading(1)} />
+                  <ToolbarButton icon={Heading2} label="Heading 2" onClick={() => setHeading(2)} />
+                  <ToolbarButton icon={Heading3} label="Heading 3" onClick={() => setHeading(3)} />
+                </div>
+                <Separator orientation="vertical" className="hidden h-6 sm:block" />
+                <div className="flex items-center gap-1">
+                  <ToolbarButton icon={Quote} label="Quote" onClick={() => toggleLinePrefix('> ')} />
+                  <ToolbarButton icon={List} label="Bulleted list" onClick={() => toggleList('bullet')} />
+                  <ToolbarButton icon={ListOrdered} label="Numbered list" onClick={() => toggleList('ordered')} />
+                  <ToolbarButton icon={ListChecks} label="Task list" onClick={() => toggleList('task')} />
+                </div>
+                <Separator orientation="vertical" className="hidden h-6 sm:block" />
+                <div className="flex items-center gap-1">
+                  <ToolbarButton icon={Code2} label="Code block" onClick={insertCodeBlock} />
+                  <ToolbarButton icon={Minus} label="Divider" onClick={insertHorizontalRule} />
+                  <ToolbarButton icon={TableIcon} label="Table" onClick={insertTableSnippet} />
+                  <ToolbarButton icon={LinkIcon} label="Link" onClick={insertLink} />
+                  <ToolbarButton icon={ImageIcon} label="Image" onClick={insertImage} />
+                </div>
+              </div>
+            </div>
+          </TooltipProvider>
 
           {/* Editor area */}
           <div className="grid grid-rows-[auto_auto_1fr_auto] gap-2">
