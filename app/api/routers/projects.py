@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import mimetypes
 import hashlib
 import datetime as dt
 from email.utils import format_datetime
@@ -9,6 +10,7 @@ from threading import Lock
 from typing import Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi.responses import FileResponse
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
@@ -32,7 +34,7 @@ from ..schemas import (
     ProjectActivityEntry,
 )
 from ..settings import settings
-from ..utils import slugify
+from ..utils import slugify, safe_join
 import shutil
 from ..services.tagging import get_project_tag_details, set_project_tags
 from ..git_ops import repo_history, GitError
@@ -1008,6 +1010,45 @@ def list_project_files(project_id: str, db: Session = Depends(get_db)):
     if not p:
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND"})
     return p.files
+
+
+@router.get("/{project_id}/files/raw")
+def get_project_file_asset(project_id: str, path: str = Query(..., description="File path within the project"), db: Session = Depends(get_db)):
+    project = db.get(Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND"})
+
+    segments: list[str] = []
+    for seg in path.split('/'):
+        if not seg or seg == '.':
+            continue
+        if seg == '..':
+            if segments:
+                segments.pop()
+            continue
+        segments.append(seg)
+    normalized = '/'.join(segments)
+    project_base = os.path.join(settings.data_dir, 'projects', project.slug)
+
+    try:
+        abs_path = safe_join(project_base, 'files', normalized)
+    except Exception:
+        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND"})
+
+    if abs_path and os.path.isfile(abs_path):
+        mime_type, _ = mimetypes.guess_type(abs_path)
+        resp = FileResponse(abs_path, media_type=mime_type or 'application/octet-stream', filename=os.path.basename(abs_path))
+        resp.headers["Content-Disposition"] = f"inline; filename=\"{os.path.basename(abs_path)}\""
+        return resp
+
+    file_row = db.scalar(select(File).where(File.project_id == project_id, File.path == normalized))
+    if file_row and file_row.content_md is not None:
+        media_type = 'text/plain; charset=utf-8'
+        if file_row.path.lower().endswith(('.md', '.markdown', '.html')):
+            media_type = 'text/html; charset=utf-8'
+        return Response(content=file_row.content_md, media_type=media_type)
+
+    raise HTTPException(status_code=404, detail={"code": "NOT_FOUND"})
 
 
 @router.get("/{project_id}/files/tree")

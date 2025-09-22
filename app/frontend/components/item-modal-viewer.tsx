@@ -8,6 +8,7 @@ import { apiJson } from '@/lib/apiClient'
 import { toast } from 'sonner'
 import { span } from '@/lib/telemetry'
 import { MarkdownViewer } from '@/components/markdown-viewer'
+import { ImagePreview } from '@/components/files/image-preview'
 
 type Props = { file: FileItem | null; onClose: () => void; projectId?: string; onDeleted?: () => void }
 
@@ -18,6 +19,7 @@ export function ItemModalViewer({ file, onClose, projectId, onDeleted }: Props) 
   const [path, setPath] = useState('')
   const [tags, setTags] = useState('')
   const [content, setContent] = useState('')
+  const isImageFile = file ? isImagePath(file.path) : false
   useEffect(() => {
     if (!file) return
     setIsEditing(false)
@@ -58,7 +60,7 @@ export function ItemModalViewer({ file, onClose, projectId, onDeleted }: Props) 
   })
   const tocRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
-    if (!file) return
+    if (!file || isImagePath(file.path)) return
     // generate IDs for headings and a simple ToC
     const container = document.querySelector('#md-view')
     if (!container) return
@@ -86,12 +88,30 @@ export function ItemModalViewer({ file, onClose, projectId, onDeleted }: Props) 
                 <>
                   <h1 className="mb-2 text-2xl font-bold">{file.title}</h1>
                   <div className="mb-4 text-sm text-muted-foreground">{file.path}</div>
-                  <MarkdownViewer html={file.rendered_html} md={file.content_md} />
+                  {isImageFile ? (
+                    <ImagePreview
+                      src={`/projects/${file.project_id}/files/raw?path=${encodeURIComponent(file.path)}`}
+                      alt={file.title}
+                      className="bg-transparent p-0"
+                      imageClassName="max-h-[70vh] max-w-full"
+                    />
+                  ) : (
+                    <MarkdownViewer
+                      html={file.rendered_html}
+                      md={file.content_md}
+                      projectId={file.project_id}
+                      filePath={file.path}
+                    />
+                  )}
                   <div className="mt-6 flex items-center justify-end gap-2">
-                    {file && (
-                      <a className="underline-offset-2 hover:underline" href={`/projects/${file.project_id}/edit/${file.id}`}>Open in Editor</a>
+                    {!isImageFile && file && (
+                      <a className="underline-offset-2 hover:underline" href={`/projects/${file.project_id}/edit/${file.id}`}>
+                        Open in Editor
+                      </a>
                     )}
-                    <Button variant="outline" onClick={() => setIsEditing(true)}>Edit</Button>
+                    {!isImageFile && (
+                      <Button variant="outline" onClick={() => setIsEditing(true)}>Edit</Button>
+                    )}
                     {file && (
                       <Button variant="destructive" onClick={() => del.mutate(file.id)}>
                         Delete
@@ -133,12 +153,23 @@ export function ItemModalViewer({ file, onClose, projectId, onDeleted }: Props) 
               )}
             </article>
             <aside className="hidden max-h-[70vh] overflow-y-auto border-l pl-4 md:block">
-              <div className="mb-2 text-sm font-semibold">Contents</div>
-              <div ref={tocRef} className="space-y-1" />
+              {!isImageFile && (
+                <>
+                  <div className="mb-2 text-sm font-semibold">Contents</div>
+                  <div ref={tocRef} className="space-y-1" />
+                </>
+              )}
             </aside>
           </div>
         )}
       </DialogContent>
     </Dialog>
   )
+}
+
+function isImagePath(path: string | undefined | null): boolean {
+  if (!path) return false
+  const ext = path.split('.').pop()?.toLowerCase()
+  if (!ext) return false
+  return ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'ico', 'heic', 'heif', 'avif'].includes(ext)
 }

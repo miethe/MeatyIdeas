@@ -329,6 +329,7 @@ class FilePreviewResponse(BaseModel):
     rendered_html: str | None = None
     is_truncated: bool = False
     preview_type: str = "text"
+    preview_url: str | None = None
     language: str | None = None
     updated_at: dt.datetime
 

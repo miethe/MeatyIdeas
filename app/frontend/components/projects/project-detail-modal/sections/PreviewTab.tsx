@@ -1,8 +1,11 @@
+import * as React from 'react'
+
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/skeleton'
 import { ExternalLink, FileWarning } from 'lucide-react'
 
 import { MarkdownViewer } from '@/components/markdown-viewer'
+import { ImagePreview } from '@/components/files/image-preview'
 import { FilePreview, ProjectModalSummary } from '@/lib/types'
 
 import { TreeSelection } from '../types'
@@ -52,6 +55,22 @@ export function PreviewTab({
     return <div className="flex h-full items-center justify-center text-sm text-muted-foreground">No preview available.</div>
   }
 
+  if (preview.preview_type === 'image') {
+    const updated = preview.updated_at ? new Date(preview.updated_at) : null
+    return (
+      <div className="flex h-full flex-col">
+        <div className="border-b px-6 py-3">
+          <div className="text-sm font-medium">{preview.title}</div>
+          <div className="text-xs text-muted-foreground">
+            {preview.path} • {preview.size.toLocaleString()} bytes
+            {updated && <> • Updated {updated.toLocaleString()}</>}
+          </div>
+        </div>
+        <ImagePreview src={preview.preview_url || `/files/${preview.id}/raw`} alt={preview.title} />
+      </div>
+    )
+  }
+
   if (preview.preview_type !== 'text') {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center text-sm text-muted-foreground">
@@ -75,22 +94,30 @@ export function PreviewTab({
 
   const updated = preview.updated_at ? new Date(preview.updated_at) : null
   const isMarkdown = (preview.language || '').toLowerCase() === 'markdown'
+  const header = (
+    <div className="border-b px-6 py-3">
+      <div className="text-sm font-medium">{preview.title}</div>
+      <div className="text-xs text-muted-foreground">
+        {preview.path} • {preview.size.toLocaleString()} bytes
+        {updated && <> • Updated {updated.toLocaleString()}</>}
+        {preview.is_truncated && (
+          <> • Truncated preview (first {(Math.round((preview.content?.length || 0) / 1000) || 0).toLocaleString()} KB)</>
+        )}
+      </div>
+    </div>
+  )
 
   return (
     <div className="flex h-full flex-col">
-      <div className="border-b px-6 py-3">
-        <div className="text-sm font-medium">{preview.title}</div>
-        <div className="text-xs text-muted-foreground">
-          {preview.path} • {preview.size.toLocaleString()} bytes
-          {updated && <> • Updated {updated.toLocaleString()}</>}
-          {preview.is_truncated && (
-            <> • Truncated preview (first {(Math.round((preview.content?.length || 0) / 1000) || 0).toLocaleString()} KB)</>
-          )}
-        </div>
-      </div>
+      {header}
       <div className="flex-1 overflow-auto px-6 py-4">
         {isMarkdown && preview.rendered_html ? (
-          <MarkdownViewer html={preview.rendered_html} md={preview.content || ''} />
+          <MarkdownViewer
+            html={preview.rendered_html}
+            md={preview.content || ''}
+            projectId={preview.project_id}
+            filePath={preview.path}
+          />
         ) : highlightedHtml ? (
           <pre className="language" dangerouslySetInnerHTML={{ __html: highlightedHtml }} />
         ) : (

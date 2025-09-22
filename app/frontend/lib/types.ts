@@ -157,6 +157,7 @@ export const FilePreviewSchema = z.object({
   rendered_html: z.string().nullable().optional(),
   is_truncated: z.boolean().default(false),
   preview_type: z.string().default('text'),
+  preview_url: z.string().nullable().optional(),
   language: z.string().nullable().optional(),
   updated_at: z.string(),
 })

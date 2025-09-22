@@ -7,6 +7,7 @@ import datetime as dt
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi.responses import FileResponse
 from markdown_it import MarkdownIt
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
@@ -178,16 +179,42 @@ def preview_file(file_id: str, response: Response, db: Session = Depends(get_db)
     if not f:
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND"})
 
+    project = db.get(Project, f.project_id)
+    proj_dir = None
+    abs_path = None
+    on_disk_size = None
+    if project:
+        proj_dir = os.path.join(settings.data_dir, "projects", project.slug)
+        try:
+            abs_path = safe_join(proj_dir, "files", f.path)
+            if os.path.isfile(abs_path):
+                on_disk_size = os.path.getsize(abs_path)
+        except Exception:
+            abs_path = None
+            on_disk_size = None
+
     raw_content = f.content_md or ""
-    size_bytes = len(raw_content.encode("utf-8"))
-    is_truncated = size_bytes > _PREVIEW_MAX_BYTES
-    preview_content = raw_content[:_PREVIEW_MAX_BYTES] if is_truncated else raw_content
+    raw_size_bytes = len(raw_content.encode("utf-8"))
+    preview_content = raw_content
+    is_truncated = False
+    if raw_size_bytes > _PREVIEW_MAX_BYTES:
+        preview_content = raw_content[:_PREVIEW_MAX_BYTES]
+        is_truncated = True
+
+    size_bytes = on_disk_size or raw_size_bytes
+
     ext = f.path.rsplit(".", 1)[-1].lower() if "." in f.path else ""
     language = _infer_language(f.path)
     mime_type, _ = mimetypes.guess_type(f.path)
 
     preview_type = "text"
-    if ext and ext not in _TEXT_EXTENSIONS and not _looks_plain_text(preview_content):
+    preview_url: str | None = None
+    if mime_type and mime_type.startswith("image/") and abs_path and os.path.isfile(abs_path):
+        preview_type = "image"
+        preview_content = None
+        is_truncated = False
+        preview_url = f"/files/{f.id}/raw"
+    elif ext and ext not in _TEXT_EXTENSIONS and not _looks_plain_text(preview_content):
         preview_type = "binary"
         preview_content = None
 
@@ -214,12 +241,40 @@ def preview_file(file_id: str, response: Response, db: Session = Depends(get_db)
         rendered_html=rendered_html,
         is_truncated=is_truncated,
         preview_type=preview_type,
+        preview_url=preview_url,
         language=language,
         updated_at=last_modified or dt.datetime.now(tz=dt.timezone.utc),
     )
 
     _apply_cache_headers(response, signature, last_modified)
     return payload
+
+
+@router.get("/{file_id}/raw")
+def get_file_raw(file_id: str, db: Session = Depends(get_db)):
+    f = db.get(File, file_id)
+    if not f:
+        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND"})
+    project = db.get(Project, f.project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail={"code": "PROJECT_NOT_FOUND"})
+
+    proj_dir = os.path.join(settings.data_dir, "projects", project.slug)
+    try:
+        abs_path = safe_join(proj_dir, "files", f.path)
+    except Exception:
+        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND"})
+
+    if abs_path and os.path.isfile(abs_path):
+        mime_type, _ = mimetypes.guess_type(f.path)
+        resp = FileResponse(abs_path, media_type=mime_type or "application/octet-stream", filename=os.path.basename(f.path))
+        resp.headers["Content-Disposition"] = f"inline; filename=\"{os.path.basename(f.path)}\""
+        return resp
+
+    if f.content_md is not None:
+        return Response(content=f.content_md, media_type="text/plain; charset=utf-8")
+
+    raise HTTPException(status_code=404, detail={"code": "NOT_FOUND"})
 
 
 @router.put("/{file_id}", response_model=FileRead)
