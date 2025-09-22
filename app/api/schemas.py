@@ -104,8 +104,8 @@ class FileCreate(BaseModel):
     path: str
     content_md: str
     title: str | None = None
-    tags: list[str] = Field(default_factory=list)
-    front_matter: dict[str, Any] = Field(default_factory=dict)
+    tags: list[str] | None = None
+    front_matter: dict[str, Any] | None = None
     rewrite_links: bool = True
 
 
@@ -117,6 +117,12 @@ class FileRead(BaseModel):
     content_md: str
     rendered_html: str
     tags: list[str]
+    front_matter: dict[str, Any] = Field(default_factory=dict)
+    description: str | None = None
+    links: list[dict[str, Any]] = Field(default_factory=list)
+    icon_hint: str | None = None
+    tag_details: list[dict[str, Any]] = Field(default_factory=list)
+    summary: str | None = None
     updated_at: dt.datetime
 
     class Config:

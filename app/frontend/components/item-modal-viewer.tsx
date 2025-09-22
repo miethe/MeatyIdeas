@@ -49,7 +49,7 @@ export function ItemModalViewer({ file, onClose, projectId, onDeleted }: Props) 
           .split(',')
           .map((t) => t.trim())
           .filter(Boolean),
-        front_matter: {},
+        front_matter: file?.front_matter || undefined,
       }),
     onSuccess: () => {
       toast.success('File updated')

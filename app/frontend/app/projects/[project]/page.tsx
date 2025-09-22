@@ -21,6 +21,8 @@ import { ShareLinksDialog } from '@/components/projects/share-links-dialog'
 import { BundlesHistory } from '@/components/bundles/bundles-history'
 import { ProjectEvents } from '@/components/projects/project-events'
 import { FileTree } from '@/components/files/file-tree'
+import { FileIcon } from '@/components/files/file-icon'
+import { TagChip, OverflowTagChip } from '@/components/tags/tag-chip'
 import { ProjectActionsMenu } from '@/components/projects/project-actions-menu'
 import { ProjectEditDialog } from '@/components/projects/project-edit-dialog'
 import { ProjectGroupsDialog } from '@/components/projects/project-groups-dialog'
@@ -179,16 +181,44 @@ export default function ProjectPage() {
         </div>
       ) : files.data && files.data.length > 0 ? (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {files.data.map((f) => (
-            <Card key={f.id} className="cursor-pointer hover:bg-accent/30" onClick={() => { span('ui.open.item_modal', { file_id: f.id }); setSelected(f) }}>
-              <CardHeader>
-                <CardTitle className="truncate">{f.title}</CardTitle>
-              </CardHeader>
-              <CardContent className="text-sm text-muted-foreground">
-                <div className="truncate">{f.path}</div>
-              </CardContent>
-            </Card>
-          ))}
+          {files.data.map((f) => {
+            const tags = f.tag_details?.slice(0, 3) ?? []
+            const overflowTags = f.tag_details && f.tag_details.length > 3 ? f.tag_details.slice(3) : []
+            const extension = f.path.includes('.') ? (f.path.split('.').pop()?.toLowerCase() ?? null) : null
+            return (
+              <Card
+                key={f.id}
+                className="cursor-pointer transition hover:-translate-y-0.5 hover:shadow-sm"
+                onClick={() => {
+                  span('ui.open.item_modal', { file_id: f.id })
+                  setSelected(f)
+                }}
+              >
+                <CardHeader className="pb-2">
+                  <div className="flex items-start gap-3">
+                    <FileIcon type="file" hint={f.icon_hint || extension} extension={extension} className="mt-1 text-muted-foreground" />
+                    <div className="min-w-0 flex-1">
+                      <CardTitle className="truncate text-base font-semibold">{f.title}</CardTitle>
+                      <div className="truncate text-xs text-muted-foreground">{f.path}</div>
+                      {tags.length > 0 && (
+                        <div className="mt-2 flex flex-wrap gap-1">
+                          {tags.map((tag) => (
+                            <TagChip key={tag.slug} tag={tag} maxWidth={120} />
+                          ))}
+                          {overflowTags.length > 0 && <OverflowTagChip overflow={overflowTags} />}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="pt-0">
+                  <p className="min-h-[2.5rem] text-sm text-muted-foreground">
+                    {f.summary || 'No description yet.'}
+                  </p>
+                </CardContent>
+              </Card>
+            )
+          })}
         </div>
       ) : (
         <div className="rounded-lg border p-8 text-center text-muted-foreground">No files yet.</div>

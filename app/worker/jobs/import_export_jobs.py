@@ -12,6 +12,7 @@ from typing import Iterable
 
 import redis
 from git import Repo  # type: ignore
+from markdown_it import MarkdownIt
 
 from api.settings import settings as api_settings  # type: ignore
 from api.db import SessionLocal  # type: ignore
@@ -22,6 +23,8 @@ from api.search import index_file  # type: ignore
 from api.events_pub import publish_event  # type: ignore
 from api.utils import slugify  # type: ignore
 from api.app_logging import get_logger  # type: ignore
+from api.services.frontmatter import prepare_front_matter  # type: ignore
+from api.services.tagging import ensure_tags  # type: ignore
 
 
 def _publish(project_id: str, evt: str, payload: dict | None = None) -> None:
@@ -39,6 +42,30 @@ def _safe_rel(path: str) -> str:
     path = path.replace("\\", "/")
     parts = [seg for seg in path.split("/") if seg and seg not in (".", "..")]
     return "/".join(parts)
+
+
+_md = MarkdownIt("commonmark").enable("table").enable("strikethrough")
+
+
+def _render_markdown(md_text: str) -> str:
+    return _md.render(md_text)
+
+
+def _search_blob(title: str, body: str, front_matter: dict) -> str:
+    fm_parts: list[str] = []
+    for value in (front_matter or {}).values():
+        if isinstance(value, (str, int, float)):
+            fm_parts.append(str(value))
+        elif isinstance(value, (list, tuple, set)):
+            for item in value:
+                if isinstance(item, (str, int, float)):
+                    fm_parts.append(str(item))
+                elif isinstance(item, dict):
+                    fm_parts.extend(str(v) for v in item.values() if isinstance(v, (str, int, float)))
+        elif isinstance(value, dict):
+            fm_parts.extend(str(v) for v in value.values() if isinstance(v, (str, int, float)))
+    fm_text = "\n".join(fm_parts)
+    return "\n".join(filter(None, [title, fm_text, body]))
 
 
 def _ensure_dirs(db, project_id: str, file_rel_paths: Iterable[str]) -> None:
@@ -110,26 +137,53 @@ def import_zip(*, project_id: str, zip_path: str, target_path: str | None = None
                 out_rel = _safe_rel(os.path.join(_safe_rel(target_path or ""), dest_rel))
                 abs_path = os.path.join(proj_dir, "files", out_rel)
                 os.makedirs(os.path.dirname(abs_path), exist_ok=True)
+                prepared = prepare_front_matter(text)
                 with open(abs_path, "w") as fh:
-                    fh.write(text)
+                    fh.write(prepared.content)
                 # Upsert DB row (by path)
                 existing = db.query(FileModel).filter(FileModel.project_id == project_id, FileModel.path == out_rel).first()
                 if existing:
-                    existing.content_md = text
-                    existing.rendered_html = existing.content_md  # server renders elsewhere
+                    existing.content_md = prepared.content
+                    existing.front_matter = prepared.front_matter
+                    existing.rendered_html = _render_markdown(prepared.body or prepared.content)
+                    existing.tags = prepared.tags
+                    if prepared.tags:
+                        ensure_tags(db, prepared.tags)
                     db.add(existing)
                     db.commit()
                     db.refresh(existing)
                     with db.bind.begin() as conn:  # type: ignore
-                        index_file(conn, existing.id, f"{existing.title}\n{existing.content_md}", title=existing.title, path=existing.path)
+                        index_file(
+                            conn,
+                            existing.id,
+                            _search_blob(existing.title, prepared.body, prepared.front_matter),
+                            title=existing.title,
+                            path=existing.path,
+                        )
                 else:
                     title = os.path.basename(out_rel) or "Untitled"
-                    fobj = FileModel(project_id=project_id, path=out_rel, title=title, front_matter={}, content_md=text, rendered_html=text, tags=[])
+                    if prepared.tags:
+                        ensure_tags(db, prepared.tags)
+                    fobj = FileModel(
+                        project_id=project_id,
+                        path=out_rel,
+                        title=title,
+                        front_matter=prepared.front_matter,
+                        content_md=prepared.content,
+                        rendered_html=_render_markdown(prepared.body or prepared.content),
+                        tags=prepared.tags,
+                    )
                     db.add(fobj)
                     db.commit()
                     db.refresh(fobj)
                     with db.bind.begin() as conn:  # type: ignore
-                        index_file(conn, fobj.id, f"{fobj.title}\n{fobj.content_md}", title=fobj.title, path=fobj.path)
+                        index_file(
+                            conn,
+                            fobj.id,
+                            _search_blob(fobj.title, prepared.body, prepared.front_matter),
+                            title=fobj.title,
+                            path=fobj.path,
+                        )
                 count += 1
                 imported.append(out_rel)
         _ensure_dirs(db, project_id, imported)
@@ -164,25 +218,52 @@ def import_json(*, project_id: str, json_path: str, target_path: str | None = No
             out_rel = _safe_rel(os.path.join(_safe_rel(target_path or ""), rel))
             abs_path = os.path.join(proj_dir, "files", out_rel)
             os.makedirs(os.path.dirname(abs_path), exist_ok=True)
+            prepared = prepare_front_matter(text)
             with open(abs_path, "w") as fh:
-                fh.write(text)
+                fh.write(prepared.content)
             existing = db.query(FileModel).filter(FileModel.project_id == project_id, FileModel.path == out_rel).first()
             if existing:
-                existing.content_md = text
-                existing.rendered_html = text
+                existing.content_md = prepared.content
+                existing.front_matter = prepared.front_matter
+                existing.rendered_html = _render_markdown(prepared.body or prepared.content)
+                existing.tags = prepared.tags
+                if prepared.tags:
+                    ensure_tags(db, prepared.tags)
                 db.add(existing)
                 db.commit()
                 db.refresh(existing)
                 with db.bind.begin() as conn:  # type: ignore
-                    index_file(conn, existing.id, f"{existing.title}\n{existing.content_md}", title=existing.title, path=existing.path)
+                    index_file(
+                        conn,
+                        existing.id,
+                        _search_blob(existing.title, prepared.body, prepared.front_matter),
+                        title=existing.title,
+                        path=existing.path,
+                    )
             else:
                 title = os.path.basename(out_rel) or "Untitled"
-                fobj = FileModel(project_id=project_id, path=out_rel, title=title, front_matter={}, content_md=text, rendered_html=text, tags=[])
+                if prepared.tags:
+                    ensure_tags(db, prepared.tags)
+                fobj = FileModel(
+                    project_id=project_id,
+                    path=out_rel,
+                    title=title,
+                    front_matter=prepared.front_matter,
+                    content_md=prepared.content,
+                    rendered_html=_render_markdown(prepared.body or prepared.content),
+                    tags=prepared.tags,
+                )
                 db.add(fobj)
                 db.commit()
                 db.refresh(fobj)
                 with db.bind.begin() as conn:  # type: ignore
-                    index_file(conn, fobj.id, f"{fobj.title}\n{fobj.content_md}", title=fobj.title, path=fobj.path)
+                    index_file(
+                        conn,
+                        fobj.id,
+                        _search_blob(fobj.title, prepared.body, prepared.front_matter),
+                        title=fobj.title,
+                        path=fobj.path,
+                    )
             count += 1
             imported.append(out_rel)
         _ensure_dirs(db, project_id, imported)
@@ -238,25 +319,52 @@ def import_git(*, project_id: str, repo_url: str, include_globs: list[str] | Non
                 out_rel = _safe_rel(os.path.join(_safe_rel(target_path or ""), rel))
                 abs_path = os.path.join(to_dir, rel)
                 os.makedirs(os.path.dirname(abs_path), exist_ok=True)
+                prepared = prepare_front_matter(text)
                 with open(abs_path, "w") as out:
-                    out.write(text)
+                    out.write(prepared.content)
                 existing = db.query(FileModel).filter(FileModel.project_id == project_id, FileModel.path == out_rel).first()
                 if existing:
-                    existing.content_md = text
-                    existing.rendered_html = text
+                    existing.content_md = prepared.content
+                    existing.front_matter = prepared.front_matter
+                    existing.rendered_html = _render_markdown(prepared.body or prepared.content)
+                    existing.tags = prepared.tags
+                    if prepared.tags:
+                        ensure_tags(db, prepared.tags)
                     db.add(existing)
                     db.commit()
                     db.refresh(existing)
-                    with db.bind.begin() as conn:  # type: ignore
-                        index_file(conn, existing.id, f"{existing.title}\n{existing.content_md}", title=existing.title, path=existing.path)
+                with db.bind.begin() as conn:  # type: ignore
+                    index_file(
+                        conn,
+                        existing.id,
+                        _search_blob(existing.title, prepared.body, prepared.front_matter),
+                        title=existing.title,
+                        path=existing.path,
+                    )
                 else:
                     title = os.path.basename(out_rel) or "Untitled"
-                    fobj = FileModel(project_id=project_id, path=out_rel, title=title, front_matter={}, content_md=text, rendered_html=text, tags=[])
+                    if prepared.tags:
+                        ensure_tags(db, prepared.tags)
+                    fobj = FileModel(
+                        project_id=project_id,
+                        path=out_rel,
+                        title=title,
+                        front_matter=prepared.front_matter,
+                        content_md=prepared.content,
+                        rendered_html=_render_markdown(prepared.body or prepared.content),
+                        tags=prepared.tags,
+                    )
                     db.add(fobj)
                     db.commit()
                     db.refresh(fobj)
                     with db.bind.begin() as conn:  # type: ignore
-                        index_file(conn, fobj.id, f"{fobj.title}\n{fobj.content_md}", title=fobj.title, path=fobj.path)
+                        index_file(
+                            conn,
+                            fobj.id,
+                            _search_blob(fobj.title, prepared.body, prepared.front_matter),
+                            title=fobj.title,
+                            path=fobj.path,
+                        )
                 count += 1
                 imported.append(out_rel)
         _ensure_dirs(db, project_id, imported)

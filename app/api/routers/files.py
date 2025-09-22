@@ -4,7 +4,7 @@ import os
 import mimetypes
 import hashlib
 import datetime as dt
-from typing import List
+from typing import Any, List
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import FileResponse
@@ -13,10 +13,10 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from ..db import SessionLocal, engine
-from ..models import File, Project
+from ..models import File, Project, Tag
 from ..schemas import FileCreate, FileRead, LinkInfo, MoveFileRequest, MoveFileDryRunResult, MoveFileApplyResult, FilePreviewResponse
 from ..settings import settings
-from ..utils import safe_join
+from ..utils import safe_join, slugify
 import os
 from ..search import index_file
 from ..links import upsert_links, rewrite_wikilinks, list_outgoing_links
@@ -24,6 +24,8 @@ import shutil
 from ..events_pub import publish_event
 from ..schemas import FilesBatchMoveRequest, FilesBatchMoveResult, FileMovePreview, DirectoryChange
 from ..models import Directory
+from ..services.frontmatter import prepare_front_matter, build_tag_details, extract_front_matter, summarize_markdown
+from ..services.tagging import ensure_tags
 
 
 router = APIRouter(prefix="/files", tags=["files"])
@@ -132,21 +134,81 @@ def _looks_plain_text(value: str) -> bool:
     return all(ord(ch) >= 32 or ch in "\n\r\t" for ch in snippet)
 
 
+def _serialize_file(file_obj: File, tag_lookup: dict[str, Tag] | None = None) -> FileRead:
+    front_matter = file_obj.front_matter or {}
+    tags = list(file_obj.tags or [])
+    tag_details = build_tag_details(tags, tag_lookup)
+    icon_hint = front_matter.get('icon') if isinstance(front_matter.get('icon'), str) else None
+    if not icon_hint:
+        if file_obj.path and '.' in file_obj.path:
+            icon_hint = file_obj.path.rsplit('.', 1)[-1].lower()
+    _, body = extract_front_matter(file_obj.content_md or '')
+    description_value = front_matter.get('description') if isinstance(front_matter.get('description'), str) else None
+    if description_value:
+        description_value = description_value.strip() or None
+    summary_text = summarize_markdown(body)
+    if description_value:
+        truncated_description = description_value if len(description_value) <= 180 else description_value[:179].rstrip() + '…'
+    else:
+        truncated_description = None
+    return FileRead(
+        id=file_obj.id,
+        project_id=file_obj.project_id,
+        path=file_obj.path,
+        title=file_obj.title,
+        content_md=file_obj.content_md,
+        rendered_html=file_obj.rendered_html,
+        tags=tags,
+        front_matter=front_matter,
+        description=description_value,
+        links=list(front_matter.get('links') or []),
+        icon_hint=icon_hint,
+        tag_details=tag_details,
+        summary=truncated_description or summary_text,
+        updated_at=file_obj.updated_at,
+    )
+
+
+def _build_search_blob(title: str, body: str, front_matter: dict[str, Any]) -> str:
+    fm_parts: list[str] = []
+    for key, value in (front_matter or {}).items():
+        if isinstance(value, (str, int, float)):
+            fm_parts.append(str(value))
+        elif isinstance(value, (list, tuple, set)):
+            for item in value:
+                if isinstance(item, (str, int, float)):
+                    fm_parts.append(str(item))
+                elif isinstance(item, dict):
+                    fm_parts.extend(str(v) for v in item.values() if isinstance(v, (str, int, float)))
+        elif isinstance(value, dict):
+            fm_parts.extend(str(v) for v in value.values() if isinstance(v, (str, int, float)))
+    fm_text = "\n".join(fm_parts)
+    combined = "\n".join(filter(None, [title, fm_text, body]))
+    return combined
+
+
 @router.post("/project/{project_id}", response_model=FileRead, status_code=201)
 def create_file(project_id: str, body: FileCreate, db: Session = Depends(get_db)):
     project = db.get(Project, project_id)
     if not project:
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Project"})
     title = body.title or os.path.basename(body.path) or "Untitled"
-    rendered = render_markdown(body.content_md)
+
+    prepared = prepare_front_matter(body.content_md, body.front_matter, body.tags)
+    tags = prepared.tags
+
+    if tags:
+        ensure_tags(db, tags)
+
+    rendered = render_markdown(prepared.body or prepared.content)
     f = File(
         project_id=project_id,
         path=body.path,
         title=title,
-        front_matter=body.front_matter,
-        content_md=body.content_md,
+        front_matter=prepared.front_matter,
+        content_md=prepared.content,
         rendered_html=rendered,
-        tags=body.tags,
+        tags=tags,
     )
     db.add(f)
     db.commit()
@@ -156,13 +218,17 @@ def create_file(project_id: str, body: FileCreate, db: Session = Depends(get_db)
     abs_path = safe_join(proj_dir, "files", body.path)
     os.makedirs(os.path.dirname(abs_path), exist_ok=True)
     with open(abs_path, "w") as fh:
-        fh.write(body.content_md)
+        fh.write(prepared.content)
     # index
     with engine.begin() as conn:
-        index_file(conn, f.id, f"{f.title}\n{f.content_md}", title=f.title, path=f.path)
+        index_file(conn, f.id, _build_search_blob(f.title, prepared.body, prepared.front_matter), title=f.title, path=f.path)
     # links
-    upsert_links(db, project_id, f, body.content_md)
-    return f
+    upsert_links(db, project_id, f, prepared.body)
+    tag_lookup: dict[str, Tag] = {}
+    if tags:
+        tag_rows = db.scalars(select(Tag).where(Tag.slug.in_({slugify(tag) for tag in tags if slugify(tag)}))).all()
+        tag_lookup = {row.slug: row for row in tag_rows}
+    return _serialize_file(f, tag_lookup)
 
 
 @router.get("/{file_id}", response_model=FileRead)
@@ -170,7 +236,12 @@ def get_file(file_id: str, db: Session = Depends(get_db)):
     f = db.get(File, file_id)
     if not f:
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND"})
-    return f
+    tag_lookup: dict[str, Tag] = {}
+    if f.tags:
+        slug_set = {slugify(tag) for tag in f.tags if isinstance(tag, str)}
+        rows = db.scalars(select(Tag).where(Tag.slug.in_(slug_set))).all()
+        tag_lookup = {row.slug: row for row in rows}
+    return _serialize_file(f, tag_lookup)
 
 
 @router.get("/{file_id}/preview", response_model=FilePreviewResponse)
@@ -286,10 +357,13 @@ def update_file(file_id: str, body: FileCreate, db: Session = Depends(get_db)):
     old_path = f.path
     f.path = body.path
     f.title = body.title or f.title
-    f.front_matter = body.front_matter
-    f.content_md = body.content_md
-    f.rendered_html = render_markdown(body.content_md)
-    f.tags = body.tags
+    prepared = prepare_front_matter(body.content_md, body.front_matter, body.tags)
+    if prepared.tags:
+        ensure_tags(db, prepared.tags)
+    f.front_matter = prepared.front_matter
+    f.content_md = prepared.content
+    f.rendered_html = render_markdown(prepared.body or prepared.content)
+    f.tags = prepared.tags
     db.add(f)
     db.commit()
     db.refresh(f)
@@ -299,7 +373,7 @@ def update_file(file_id: str, body: FileCreate, db: Session = Depends(get_db)):
     abs_path = safe_join(proj_dir, "files", body.path)
     os.makedirs(os.path.dirname(abs_path), exist_ok=True)
     with open(abs_path, "w") as fh:
-        fh.write(body.content_md)
+        fh.write(prepared.content)
     # remove old on-disk file if path changed
     if old_path and old_path != body.path:
         try:
@@ -310,13 +384,18 @@ def update_file(file_id: str, body: FileCreate, db: Session = Depends(get_db)):
             pass
     # index
     with engine.begin() as conn:
-        index_file(conn, f.id, f"{f.title}\n{f.content_md}", title=f.title, path=f.path)
+        index_file(conn, f.id, _build_search_blob(f.title, prepared.body, prepared.front_matter), title=f.title, path=f.path)
     # links
-    upsert_links(db, f.project_id, f, body.content_md)
+    upsert_links(db, f.project_id, f, prepared.body)
     # rewrite links if title changed
     if body.rewrite_links and old_title and f.title != old_title:
         rewrite_wikilinks(db, f.project_id, old_title, f.title)
-    return f
+    tag_lookup: dict[str, Tag] = {}
+    if f.tags:
+        slug_set = {slugify(tag) for tag in f.tags if isinstance(tag, str)}
+        rows = db.scalars(select(Tag).where(Tag.slug.in_(slug_set))).all()
+        tag_lookup = {row.slug: row for row in rows}
+    return _serialize_file(f, tag_lookup)
 
 
 @router.get("/{file_id}/backlinks", response_model=List[FileRead])

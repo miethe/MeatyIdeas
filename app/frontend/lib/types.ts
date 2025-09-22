@@ -46,6 +46,12 @@ export const FileTagSchema = z.object({
 })
 export type FileTag = z.infer<typeof FileTagSchema>
 
+export const FileLinkSchema = z.object({
+  url: z.string(),
+  label: z.string(),
+})
+export type FileLink = z.infer<typeof FileLinkSchema>
+
 export const ProjectCardOwnerSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -192,6 +198,12 @@ export const FileSchema = z.object({
   content_md: z.string(),
   rendered_html: z.string(),
   tags: z.array(z.string()),
+  front_matter: z.record(z.unknown()).default({}),
+  description: z.string().nullable().optional(),
+  links: z.array(FileLinkSchema).default([]),
+  icon_hint: z.string().nullable().optional(),
+  tag_details: z.array(FileTagSchema).default([]),
+  summary: z.string().nullable().optional(),
   updated_at: z.string(),
 })
 export type FileItem = z.infer<typeof FileSchema>

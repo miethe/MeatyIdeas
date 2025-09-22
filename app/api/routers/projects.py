@@ -40,6 +40,7 @@ from ..settings import settings
 from ..utils import slugify, safe_join
 import shutil
 from ..services.tagging import get_project_tag_details, set_project_tags
+from ..services.frontmatter import build_tag_details, extract_front_matter, summarize_markdown
 from ..git_ops import repo_history, GitError
 
 
@@ -1136,7 +1137,54 @@ def list_project_files(project_id: str, db: Session = Depends(get_db)):
     p = db.get(Project, project_id)
     if not p:
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND"})
-    return p.files
+    files = p.files
+    tag_slugs: set[str] = set()
+    for f in files:
+        for label in f.tags or []:
+            slug = slugify(label)
+            if slug:
+                tag_slugs.add(slug)
+    tag_lookup: dict[str, Tag] = {}
+    if tag_slugs:
+        tag_rows = db.scalars(select(Tag).where(Tag.slug.in_(tag_slugs))).all()
+        tag_lookup = {row.slug: row for row in tag_rows}
+
+    payload: list[FileRead] = []
+    for f in files:
+        front_matter = f.front_matter or {}
+        tags = list(f.tags or [])
+        description_value = front_matter.get('description') if isinstance(front_matter.get('description'), str) else None
+        if description_value:
+            description_value = description_value.strip() or None
+        icon_hint = front_matter.get('icon') if isinstance(front_matter.get('icon'), str) else None
+        if not icon_hint and f.path and '.' in f.path:
+            icon_hint = f.path.rsplit('.', 1)[-1].lower()
+        _, body = extract_front_matter(f.content_md or '')
+        summary_text = summarize_markdown(body)
+        if description_value and len(description_value) > 180:
+            summary_value = description_value[:179].rstrip() + '…'
+        else:
+            summary_value = description_value or summary_text
+        payload.append(
+            FileRead(
+                id=f.id,
+                project_id=f.project_id,
+                path=f.path,
+                title=f.title,
+                content_md=f.content_md,
+                rendered_html=f.rendered_html,
+                tags=tags,
+                front_matter=front_matter,
+                description=description_value,
+                links=list(front_matter.get('links') or []),
+                icon_hint=icon_hint,
+                tag_details=build_tag_details(tags, tag_lookup),
+                summary=summary_value,
+                updated_at=f.updated_at,
+            )
+        )
+
+    return payload
 
 
 @router.get("/{project_id}/files/raw")

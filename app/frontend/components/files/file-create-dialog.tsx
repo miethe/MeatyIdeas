@@ -15,17 +15,20 @@ export function FileCreateDialog({ projectId, children }: { projectId: string; c
   const [content, setContent] = React.useState('')
   const qc = useQueryClient()
   const create = useMutation({
-    mutationFn: async () =>
-      apiJson('POST', `/files/project/${projectId}`, {
+    mutationFn: async () => {
+      const tagList = tags
+        .split(',')
+        .map((t) => t.trim())
+        .filter(Boolean)
+      const frontMatter = tagList.length > 0 ? { tags: tagList } : undefined
+      return apiJson('POST', `/files/project/${projectId}`, {
         title: title || undefined,
         path: path || (title ? `${title.toLowerCase().replace(/\s+/g, '-')}.md` : 'untitled.md'),
         content_md: content,
-        tags: tags
-          .split(',')
-          .map((t) => t.trim())
-          .filter(Boolean),
-        front_matter: {},
-      }),
+        tags: tagList.length > 0 ? tagList : undefined,
+        front_matter: frontMatter,
+      })
+    },
     onSuccess: () => {
       span('ui.create.file')
       toast.success('File created')
