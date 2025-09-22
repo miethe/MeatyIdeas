@@ -18,6 +18,13 @@ class ProjectCreate(BaseModel):
     status: str = "idea"
 
 
+class ProjectUpdate(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    tags: list[str] | None = None
+    status: str | None = None
+
+
 class ProjectRead(BaseModel):
     id: str
     name: str
@@ -30,6 +37,7 @@ class ProjectRead(BaseModel):
     is_archived: bool = False
     created_at: dt.datetime
     updated_at: dt.datetime
+    groups: list["ProjectGroupRead"] = Field(default_factory=list)
 
     class Config:
         from_attributes = True
@@ -77,6 +85,7 @@ class ProjectCardRead(BaseModel):
     owners: list[ProjectCardOwner] = Field(default_factory=list)
     highlight: ProjectCardHighlight | None = None
     activity_sparkline: list[int] = Field(default_factory=list)
+    groups: list["ProjectGroupRead"] = Field(default_factory=list)
 
     class Config:
         from_attributes = True
@@ -277,6 +286,7 @@ class ProjectModalSummary(BaseModel):
     readme_path: str | None = None
     highlight: ProjectCardHighlight | None = None
     quick_stats: list[ProjectModalQuickStat] = Field(default_factory=list)
+    groups: list["ProjectGroupRead"] = Field(default_factory=list)
 
 
 class ProjectTreeNode(BaseModel):

@@ -1,5 +1,13 @@
 import { z } from 'zod'
 
+export const ProjectGroupSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  color: z.string().nullable().optional(),
+  sort_order: z.number(),
+})
+export type ProjectGroup = z.infer<typeof ProjectGroupSchema>
+
 export const ProjectSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -12,6 +20,7 @@ export const ProjectSchema = z.object({
   is_archived: z.boolean().optional().default(false),
   created_at: z.string(),
   updated_at: z.string(),
+  groups: z.array(ProjectGroupSchema).default([]),
 })
 export type Project = z.infer<typeof ProjectSchema>
 
@@ -61,6 +70,7 @@ export const ProjectCardSchema = z.object({
   owners: z.array(ProjectCardOwnerSchema).default([]),
   highlight: ProjectCardHighlightSchema.nullable(),
   activity_sparkline: z.array(z.number()).default([]),
+  groups: z.array(ProjectGroupSchema).default([]),
 })
 export type ProjectCard = z.infer<typeof ProjectCardSchema>
 
@@ -100,6 +110,7 @@ export const ProjectModalSummarySchema = z.object({
   readme_path: z.string().nullable().optional(),
   highlight: ProjectCardHighlightSchema.nullable().optional(),
   quick_stats: z.array(ProjectModalQuickStatSchema).default([]),
+  groups: z.array(ProjectGroupSchema).default([]),
 })
 export type ProjectModalSummary = z.infer<typeof ProjectModalSummarySchema>
 
@@ -247,15 +258,6 @@ export const RepoStatusSchema = z.object({
   dirty: z.boolean(),
 })
 export type RepoStatus = z.infer<typeof RepoStatusSchema>
-
-// Phase 5 — Groups
-export const ProjectGroupSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  color: z.string().nullable().optional(),
-  sort_order: z.number(),
-})
-export type ProjectGroup = z.infer<typeof ProjectGroupSchema>
 
 export const ProjectGroupWithProjectsSchema = ProjectGroupSchema.extend({
   projects: z.array(ProjectSchema),

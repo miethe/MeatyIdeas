@@ -3,6 +3,8 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/skeleton'
 import { ExternalLink, Star, StarOff } from 'lucide-react'
 
+import { ProjectActionsMenu } from '@/components/projects/project-actions-menu'
+
 import { ProjectModalSummary } from '@/lib/types'
 
 type ModalHeaderProps = {
@@ -12,9 +14,22 @@ type ModalHeaderProps = {
   onToggleStar: () => void
   starPending: boolean
   error?: Error | null
+  onEdit?: () => void
+  onManageGroups?: () => void
+  onDelete?: () => void
 }
 
-export function ModalHeader({ summary, loading, onExpand, onToggleStar, starPending, error }: ModalHeaderProps) {
+export function ModalHeader({
+  summary,
+  loading,
+  onExpand,
+  onToggleStar,
+  starPending,
+  error,
+  onEdit,
+  onManageGroups,
+  onDelete,
+}: ModalHeaderProps) {
   if (loading && !summary) {
     return (
       <div className="flex items-center justify-between px-6 py-4">
@@ -54,6 +69,23 @@ export function ModalHeader({ summary, loading, onExpand, onToggleStar, starPend
             {summary.status}
           </Badge>
         </div>
+        {summary.groups.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+            {summary.groups.map((group) => (
+              <span
+                key={group.id}
+                className="inline-flex items-center gap-2 rounded-full border border-dashed px-3 py-1"
+              >
+                <span
+                  className="h-2 w-2 rounded-full"
+                  style={{ backgroundColor: group.color || 'var(--primary)' }}
+                  aria-hidden="true"
+                />
+                <span className="font-medium text-foreground">{group.name}</span>
+              </span>
+            ))}
+          </div>
+        )}
         <div className="text-sm text-muted-foreground">
           {summary.description || 'No description provided.'}
         </div>
@@ -88,9 +120,15 @@ export function ModalHeader({ summary, loading, onExpand, onToggleStar, starPend
             </>
           )}
         </Button>
+        {onEdit && (
+          <Button variant="secondary" size="sm" onClick={onEdit}>
+            Edit
+          </Button>
+        )}
         <Button variant="outline" onClick={onExpand}>
           <ExternalLink className="mr-2 h-4 w-4" /> Expand →
         </Button>
+        <ProjectActionsMenu onEdit={onEdit} onManageGroups={onManageGroups} onDelete={onDelete} />
       </div>
     </div>
   )

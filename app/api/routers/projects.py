@@ -15,9 +15,10 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from ..db import SessionLocal, engine
-from ..models import Project, File, ArtifactRepo, Bundle, User, Tag, Directory, Event
+from ..models import Project, File, ArtifactRepo, Bundle, User, Tag, Directory, Event, ProjectGroup, ProjectGroupMembership
 from ..schemas import (
     ProjectCreate,
+    ProjectUpdate,
     ProjectRead,
     ProjectCardRead,
     ProjectCardLanguageStat,
@@ -32,6 +33,7 @@ from ..schemas import (
     ProjectTreeNode,
     ProjectActivityResponse,
     ProjectActivityEntry,
+    ProjectGroupRead,
 )
 from ..settings import settings
 from ..utils import slugify, safe_join
@@ -116,6 +118,69 @@ def _utc(value: dt.datetime | None) -> dt.datetime | None:
     if value.tzinfo is None:
         return value.replace(tzinfo=dt.timezone.utc)
     return value.astimezone(dt.timezone.utc)
+
+
+def _get_project_groups(db: Session, project_ids: List[str]) -> Dict[str, List[ProjectGroup]]:
+    if not project_ids:
+        return {}
+    result: Dict[str, List[ProjectGroup]] = {pid: [] for pid in project_ids}
+    rows = db.execute(
+        select(ProjectGroupMembership, ProjectGroup)
+        .join(ProjectGroup, ProjectGroupMembership.group_id == ProjectGroup.id)
+        .where(ProjectGroupMembership.project_id.in_(project_ids))
+        .order_by(ProjectGroupMembership.project_id, ProjectGroupMembership.sort_order)
+    ).all()
+    for membership, group in rows:
+        result.setdefault(membership.project_id, []).append(group)
+    return result
+
+
+def _to_group_reads(groups: List[ProjectGroup] | None) -> List[ProjectGroupRead]:
+    if not groups:
+        return []
+    return [ProjectGroupRead.model_validate(g) for g in groups]
+
+
+def _serialize_project_read(project: Project, groups: List[ProjectGroup] | None = None) -> ProjectRead:
+    return ProjectRead(
+        id=project.id,
+        name=project.name,
+        slug=project.slug,
+        description=project.description,
+        tags=project.tags,
+        status=project.status,
+        color=project.color,
+        is_starred=bool(project.is_starred),
+        is_archived=bool(project.is_archived),
+        created_at=project.created_at,
+        updated_at=project.updated_at,
+        groups=_to_group_reads(groups),
+    )
+
+
+def _apply_project_update(project: Project, body: ProjectUpdate, db: Session) -> ProjectRead:
+    if body.name is not None:
+        project.name = body.name
+    if body.description is not None:
+        project.description = body.description or ""
+    if body.status is not None:
+        project.status = body.status
+    if body.tags is not None:
+        set_project_tags(db, project, body.tags)
+
+    db.add(project)
+    db.commit()
+    db.refresh(project)
+
+    group_map = _get_project_groups(db, [project.id])
+    return _serialize_project_read(project, group_map.get(project.id))
+
+
+def _update_project_internal(project_id: str, body: ProjectUpdate, db: Session) -> ProjectRead:
+    project = db.get(Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND"})
+    return _apply_project_update(project, body, db)
 
 
 def _http_datetime(value: dt.datetime | None) -> str | None:
@@ -257,6 +322,9 @@ def _gather_modal_summary(db: Session, project: Project) -> Tuple[ProjectModalSu
         for tag in tag_details_map.get(project.id, [])
     ]
 
+    group_map = _get_project_groups(db, [project.id])
+    group_reads = _to_group_reads(group_map.get(project.id))
+
     owners = _resolve_owners(db)
     highlight = _build_highlight(files)
 
@@ -327,6 +395,7 @@ def _gather_modal_summary(db: Session, project: Project) -> Tuple[ProjectModalSu
         readme_path=readme_path,
         highlight=highlight,
         quick_stats=quick_stats,
+        groups=group_reads,
     )
 
     signature_parts = [
@@ -686,6 +755,7 @@ def list_projects(
             filtered = []
 
     project_ids = [p.id for p in filtered]
+    group_map = _get_project_groups(db, project_ids)
     files_by_project: Dict[str, list[File]] = {pid: [] for pid in project_ids}
     if project_ids:
         file_rows = db.scalars(select(File).where(File.project_id.in_(project_ids))).all()
@@ -766,6 +836,8 @@ def list_projects(
                 )
             )
 
+        group_reads = _to_group_reads(group_map.get(project.id))
+
         card = ProjectCardRead(
             id=project.id,
             name=project.name,
@@ -784,6 +856,7 @@ def list_projects(
             owners=owners,
             highlight=highlight,
             activity_sparkline=sparkline,
+            groups=group_reads,
         )
         cards.append(card)
 
@@ -808,7 +881,8 @@ def get_project(project_id: str, db: Session = Depends(get_db)):
     p = db.get(Project, project_id)
     if not p:
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Project not found"})
-    return p
+    group_map = _get_project_groups(db, [p.id])
+    return _serialize_project_read(p, group_map.get(p.id))
 
 
 @router.get("/{project_id}/modal", response_model=ProjectModalSummary)
@@ -837,17 +911,24 @@ def get_project_modal(project_id: str, response: Response, db: Session = Depends
 
 @router.put("/{project_id}", response_model=ProjectRead)
 def update_project(project_id: str, body: ProjectCreate, db: Session = Depends(get_db)):
-    p = db.get(Project, project_id)
-    if not p:
-        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND"})
-    p.name = body.name
-    p.description = body.description or ""
-    p.status = body.status
-    set_project_tags(db, p, body.tags)
-    db.add(p)
-    db.commit()
-    db.refresh(p)
-    return p
+    payload = ProjectUpdate(
+        name=body.name,
+        description=body.description,
+        status=body.status,
+        tags=body.tags,
+    )
+    return _update_project_internal(project_id, payload, db)
+
+
+@router.patch("/{project_id}", response_model=ProjectRead)
+def patch_project(project_id: str, body: ProjectUpdate, db: Session = Depends(get_db)):
+    if body.name is None and body.description is None and body.status is None and body.tags is None:
+        project = db.get(Project, project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail={"code": "NOT_FOUND"})
+        group_map = _get_project_groups(db, [project.id])
+        return _serialize_project_read(project, group_map.get(project.id))
+    return _update_project_internal(project_id, body, db)
 
 
 @router.post("/{project_id}/star", status_code=204)

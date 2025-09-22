@@ -1,8 +1,10 @@
 "use client"
 import React, { useState, useEffect } from 'react'
-import { useParams, useSearchParams } from 'next/navigation'
-import { useQuery } from '@tanstack/react-query'
-import { apiGet } from '@/lib/apiClient'
+import { useParams, useSearchParams, useRouter } from 'next/navigation'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
+
+import { apiGet, apiJson } from '@/lib/apiClient'
 import { AppShell } from '@/components/app-shell'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/skeleton'
@@ -19,6 +21,11 @@ import { ShareLinksDialog } from '@/components/projects/share-links-dialog'
 import { BundlesHistory } from '@/components/bundles/bundles-history'
 import { ProjectEvents } from '@/components/projects/project-events'
 import { FileTree } from '@/components/files/file-tree'
+import { ProjectActionsMenu } from '@/components/projects/project-actions-menu'
+import { ProjectEditDialog } from '@/components/projects/project-edit-dialog'
+import { ProjectGroupsDialog } from '@/components/projects/project-groups-dialog'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Badge } from '@/components/ui/badge'
 
 export default function ProjectPage() {
   const params = useParams<{ project: string }>()
@@ -30,6 +37,11 @@ export default function ProjectPage() {
   const [gitEnabled, setGitEnabled] = useState(false)
   const [shareEnabled, setShareEnabled] = useState(false)
   const [dirsEnabled, setDirsEnabled] = useState(false)
+  const [editOpen, setEditOpen] = useState(false)
+  const [groupsOpen, setGroupsOpen] = useState(false)
+  const [deleteOpen, setDeleteOpen] = useState(false)
+  const router = useRouter()
+  const qc = useQueryClient()
 
   const projList = useQuery({
     queryKey: ['projects-nav'],
@@ -51,6 +63,12 @@ export default function ProjectPage() {
     }
   }, [projectParam, projList.data])
 
+  useEffect(() => {
+    setEditOpen(false)
+    setGroupsOpen(false)
+    setDeleteOpen(false)
+  }, [projectId])
+
   const proj = useQuery({
     queryKey: ['project', projectId],
     queryFn: async () => ProjectSchema.parse(await apiGet<Project>(`/projects/${projectId}`)),
@@ -63,6 +81,23 @@ export default function ProjectPage() {
       return rows.map((r) => FileSchema.parse(r)) as FileItem[]
     },
     enabled: !!projectId,
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      await apiJson('DELETE', `/projects/${id}`, null)
+    },
+    onSuccess: (_, id) => {
+      toast.success('Project deleted')
+      setDeleteOpen(false)
+      qc.invalidateQueries({ queryKey: ['projects-nav'] })
+      qc.invalidateQueries({ queryKey: ['dashboard-projects'] })
+      qc.invalidateQueries({ queryKey: ['project', id] })
+      router.push('/')
+    },
+    onError: () => {
+      toast.error('Unable to delete project')
+    },
   })
 
   useEffect(() => {
@@ -87,13 +122,26 @@ export default function ProjectPage() {
   return (
     <AppShell>
       {projectId && <ProjectEvents projectId={projectId} />}
-      <div className="mb-6 flex items-center justify-between">
-        <div>
+      <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+        <div className="flex-1">
           <h1 className="text-2xl font-bold">{proj.data?.name || 'Project'}</h1>
-          <p className="text-muted-foreground">{proj.data?.description}</p>
+          {proj.data?.groups && proj.data.groups.length > 0 && (
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+              {proj.data.groups.map((group) => (
+                <Badge key={group.id} variant="outline" className="flex items-center gap-2">
+                  <span className="h-2 w-2 rounded-full" style={{ backgroundColor: group.color || 'var(--primary)' }} />
+                  <span className="font-medium text-foreground">{group.name}</span>
+                </Badge>
+              ))}
+            </div>
+          )}
+          <p className="mt-2 text-muted-foreground">{proj.data?.description || 'No description yet.'}</p>
         </div>
-        {projectId && (
-          <div className="flex items-center gap-2">
+        {projectId && proj.data && (
+          <div className="flex flex-wrap items-center gap-2 md:justify-end">
+            <Button variant="secondary" onClick={() => setEditOpen(true)}>
+              Edit
+            </Button>
             <ImportDialog projectId={projectId || undefined}>
               <Button variant="outline">Import</Button>
             </ImportDialog>
@@ -106,6 +154,11 @@ export default function ProjectPage() {
             <FileCreateDialog projectId={projectId}>
               <Button>New File</Button>
             </FileCreateDialog>
+            <ProjectActionsMenu
+              onEdit={() => setEditOpen(true)}
+              onManageGroups={() => setGroupsOpen(true)}
+              onDelete={() => setDeleteOpen(true)}
+            />
           </div>
         )}
       </div>
@@ -142,6 +195,63 @@ export default function ProjectPage() {
       )}
 
       <ItemModalViewer file={selected} onClose={() => setSelected(null)} projectId={projectId || undefined} />
+      <ProjectEditDialog
+        projectId={proj.data?.id ?? ''}
+        open={editOpen && Boolean(proj.data)}
+        onOpenChange={(open) => setEditOpen(open)}
+        initialName={proj.data?.name ?? ''}
+        initialDescription={proj.data?.description ?? ''}
+        initialStatus={proj.data?.status ?? 'idea'}
+        initialTags={proj.data?.tags ?? []}
+        onSaved={() => {
+          proj.refetch()
+          projList.refetch()
+        }}
+      />
+      <ProjectGroupsDialog
+        projectId={proj.data?.id ?? ''}
+        open={groupsOpen && Boolean(proj.data)}
+        onOpenChange={(open) => setGroupsOpen(open)}
+        currentGroupIds={proj.data?.groups?.map((group) => group.id) ?? []}
+        onSaved={() => {
+          proj.refetch()
+          projList.refetch()
+        }}
+      />
+      <Dialog
+        open={deleteOpen}
+        onOpenChange={(open) => {
+          if (!open && !deleteMutation.isPending) setDeleteOpen(false)
+          if (open) setDeleteOpen(true)
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete project</DialogTitle>
+            <DialogDescription>
+              This will permanently remove <strong>{proj.data?.name}</strong> and all associated files.
+            </DialogDescription>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Consider archiving instead if you want to retain history. Deletions cannot be undone.
+          </p>
+          <div className="flex justify-end gap-2 pt-4">
+            <Button variant="ghost" onClick={() => setDeleteOpen(false)} disabled={deleteMutation.isPending}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                if (!proj.data) return
+                deleteMutation.mutate(proj.data.id)
+              }}
+              disabled={deleteMutation.isPending}
+            >
+              {deleteMutation.isPending ? 'Deleting…' : 'Delete'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </AppShell>
   )
 }

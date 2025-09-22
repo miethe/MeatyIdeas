@@ -32,11 +32,15 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Separator } from '@/components/ui/separator'
-import { Star, ExternalLink, Eye, Filter, MoreHorizontal, Trash2 } from 'lucide-react'
+import { Star, ExternalLink, Eye, Filter } from 'lucide-react'
 import Link from 'next/link'
 import { toast } from 'sonner'
 import { getConfig } from '@/lib/config'
 import { ProjectDetailModal } from '@/components/projects/project-detail-modal/index'
+import { ProjectEditDialog } from '@/components/projects/project-edit-dialog'
+import { ProjectGroupsDialog } from '@/components/projects/project-groups-dialog'
+import { ProjectActionsMenu } from '@/components/projects/project-actions-menu'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 
 const BASE_VIEW_OPTIONS = [
   { id: 'all', label: 'All' },
@@ -155,6 +159,9 @@ export default function DashboardPage() {
   const router = useRouter()
   const pathname = usePathname()
   const qc = useQueryClient()
+  const [editingProject, setEditingProject] = React.useState<ProjectCard | null>(null)
+  const [groupsProject, setGroupsProject] = React.useState<ProjectCard | null>(null)
+  const [deleteProject, setDeleteProject] = React.useState<ProjectCard | null>(null)
 
   const viewParam = searchParams.get('view') ?? 'all'
   const tags = decodeList(searchParams.get('tags'))
@@ -377,6 +384,21 @@ export default function DashboardPage() {
     onError: () => toast.error('Unable to update star, please retry'),
   })
 
+  const deleteProjectMutation = useMutation({
+    mutationFn: async (projectId: string) => {
+      await apiJson('DELETE', `/projects/${projectId}`, null)
+    },
+    onSuccess: () => {
+      toast.success('Project deleted')
+      qc.invalidateQueries({ queryKey: ['dashboard-projects'] })
+      qc.invalidateQueries({ queryKey: ['projects-nav'] })
+      setDeleteProject(null)
+    },
+    onError: () => {
+      toast.error('Unable to delete project')
+    },
+  })
+
   const handleViewChange = (next: string) => {
     if (next === 'tag') {
       updateParams({ view: 'tag' })
@@ -552,6 +574,9 @@ export default function DashboardPage() {
               onToggleStar={handleToggleStar}
               onQuickPeek={handleQuickPeek}
               onQuickOpen={handleQuickOpen}
+              onEditProject={setEditingProject}
+              onManageGroups={setGroupsProject}
+              onDeleteProject={setDeleteProject}
             />
           )}
           {projectsQuery.hasNextPage && (
@@ -576,6 +601,61 @@ export default function DashboardPage() {
           onExpand={handleExpandFromModal}
         />
       )}
+      <ProjectEditDialog
+        projectId={editingProject?.id ?? ''}
+        open={Boolean(editingProject)}
+        onOpenChange={(open) => {
+          if (!open) setEditingProject(null)
+        }}
+        initialName={editingProject?.name ?? ''}
+        initialDescription={editingProject?.description ?? ''}
+        initialStatus={editingProject?.status ?? 'idea'}
+        initialTags={editingProject?.tag_details.map((tag) => tag.label) ?? []}
+      />
+      <ProjectGroupsDialog
+        projectId={groupsProject?.id ?? ''}
+        open={Boolean(groupsProject)}
+        onOpenChange={(open) => {
+          if (!open) setGroupsProject(null)
+        }}
+        currentGroupIds={groupsProject?.groups.map((group) => group.id) ?? []}
+      />
+      <Dialog
+        open={Boolean(deleteProject)}
+        onOpenChange={(open) => {
+          if (!open && !deleteProjectMutation.isPending) setDeleteProject(null)
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete project</DialogTitle>
+            <DialogDescription>
+              This will permanently remove <strong>{deleteProject?.name}</strong> and all associated data.
+            </DialogDescription>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            You can archive instead if you want to keep history. This action cannot be undone.
+          </p>
+          <div className="flex justify-end gap-2 pt-4">
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => setDeleteProject(null)}
+              disabled={deleteProjectMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => deleteProject && deleteProjectMutation.mutate(deleteProject.id)}
+              disabled={deleteProjectMutation.isPending}
+            >
+              {deleteProjectMutation.isPending ? 'Deleting…' : 'Delete'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </>
   )
 }
@@ -826,12 +906,18 @@ function ProjectGrid({
   onToggleStar,
   onQuickPeek,
   onQuickOpen,
+  onEditProject,
+  onManageGroups,
+  onDeleteProject,
 }: {
   projects: ProjectCard[]
   density: Density
   onToggleStar: (project: ProjectCard) => void
   onQuickPeek: (project: ProjectCard) => void
   onQuickOpen: (project: ProjectCard) => void
+  onEditProject: (project: ProjectCard) => void
+  onManageGroups: (project: ProjectCard) => void
+  onDeleteProject: (project: ProjectCard) => void
 }) {
   return (
     <div
@@ -848,6 +934,9 @@ function ProjectGrid({
           onToggleStar={onToggleStar}
           onQuickPeek={onQuickPeek}
           onQuickOpen={onQuickOpen}
+          onEditProject={onEditProject}
+          onManageGroups={onManageGroups}
+          onDeleteProject={onDeleteProject}
         />
       ))}
     </div>
@@ -860,36 +949,77 @@ function ProjectCardItem({
   onToggleStar,
   onQuickPeek,
   onQuickOpen,
+  onEditProject,
+  onManageGroups,
+  onDeleteProject,
 }: {
   project: ProjectCard
   density: Density
   onToggleStar: (project: ProjectCard) => void
   onQuickPeek: (project: ProjectCard) => void
   onQuickOpen: (project: ProjectCard) => void
+  onEditProject: (project: ProjectCard) => void
+  onManageGroups: (project: ProjectCard) => void
+  onDeleteProject: (project: ProjectCard) => void
 }) {
   const updatedDate = project.updated_at ? new Date(project.updated_at) : null
   return (
-    <div className={cn('group relative flex flex-col rounded-md border bg-card p-4 shadow-sm transition hover:border-primary/40 hover:shadow', density === 'compact' && 'p-3')}
+    <div
+      className={cn(
+        'group relative flex flex-col rounded-md border bg-card p-4 shadow-sm transition hover:border-primary/40 hover:shadow',
+        density === 'compact' && 'p-3'
+      )}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <Link href={`/projects/${project.slug}`} className="truncate text-lg font-semibold hover:underline">
             {project.name}
           </Link>
+          {project.groups.length > 0 && (
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              {project.groups.slice(0, 2).map((group) => (
+                <span
+                  key={group.id}
+                  className="inline-flex items-center gap-1 rounded-full border border-dashed px-2 py-0.5"
+                  aria-label={`Group ${group.name}`}
+                >
+                  <span
+                    className="h-2 w-2 rounded-full"
+                    style={{ backgroundColor: group.color || 'var(--primary)' }}
+                  />
+                  <span className="font-medium text-foreground">{group.name}</span>
+                </span>
+              ))}
+              {project.groups.length > 2 && (
+                <span className="inline-flex items-center rounded-full border border-dashed px-2 py-0.5 text-xs text-muted-foreground">
+                  +{project.groups.length - 2}
+                </span>
+              )}
+            </div>
+          )}
           {density !== 'compact' && (
             <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{project.description || 'No description yet.'}</p>
           )}
         </div>
-        <button
-          className={cn(
-            'rounded border px-2 py-1 text-xs transition',
-            project.is_starred ? 'border-primary bg-primary/10 text-primary' : 'border-transparent text-muted-foreground hover:border-border'
-          )}
-          onClick={() => onToggleStar(project)}
-          aria-label={project.is_starred ? 'Unstar project' : 'Star project'}
-        >
-          <Star className={cn('h-4 w-4', project.is_starred && 'fill-current')} />
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            className={cn(
+              'rounded border px-2 py-1 text-xs transition',
+              project.is_starred
+                ? 'border-primary bg-primary/10 text-primary'
+                : 'border-transparent text-muted-foreground hover:border-border'
+            )}
+            onClick={() => onToggleStar(project)}
+            aria-label={project.is_starred ? 'Unstar project' : 'Star project'}
+          >
+            <Star className={cn('h-4 w-4', project.is_starred && 'fill-current')} />
+          </button>
+          <ProjectActionsMenu
+            onEdit={() => onEditProject(project)}
+            onManageGroups={() => onManageGroups(project)}
+            onDelete={() => onDeleteProject(project)}
+          />
+        </div>
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
         <span>{project.status}</span>
