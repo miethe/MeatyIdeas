@@ -32,7 +32,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Separator } from '@/components/ui/separator'
-import { Star, ExternalLink, Eye, Filter } from 'lucide-react'
+import { Star, ExternalLink, Eye, Filter, MoreHorizontal, Trash2 } from 'lucide-react'
 import Link from 'next/link'
 import { toast } from 'sonner'
 import { getConfig } from '@/lib/config'
