@@ -30,10 +30,6 @@ export function AppShell({ children, sidebar, currentProjectId = null }: AppShel
   const [resultsInitial, setResultsInitial] = React.useState<any | undefined>(undefined)
   const [quickCreateOpen, setQuickCreateOpen] = React.useState(false)
   const [quickCreateProjectId, setQuickCreateProjectId] = React.useState<string | null>(currentProjectId)
-    if ((e.target as HTMLElement).tagName === 'INPUT' || (e.target as HTMLElement).tagName === 'TEXTAREA') return
-    e.preventDefault()
-    window.dispatchEvent(new Event('open-new-project'))
-  })
   const { data: projects } = useQuery({
     queryKey: ['projects-nav'],
     queryFn: async () => {
@@ -76,6 +72,9 @@ export function AppShell({ children, sidebar, currentProjectId = null }: AppShel
         setQuickCreateOpen(true)
         span('nav_new_select', { item: 'file_quick', method: 'hotkey', context_project_id: currentProjectId ?? null })
       } else {
+        // Legacy behavior: open new project modal
+        if ((e.target as HTMLElement).tagName === 'INPUT' || (e.target as HTMLElement).tagName === 'TEXTAREA') return
+        e.preventDefault()
         span('nav_new_select', { item: 'project', method: 'hotkey', context_project_id: currentProjectId ?? null })
         window.dispatchEvent(new Event('open-new-project'))
       }
@@ -97,6 +96,9 @@ export function AppShell({ children, sidebar, currentProjectId = null }: AppShel
         span('nav_new_select', { item: 'file_full', method: 'hotkey', context_project_id: currentProjectId ?? null })
         router.push(`/files/create${query}`)
       } else {
+        // Legacy behavior: open new project modal
+        if ((e.target as HTMLElement).tagName === 'INPUT' || (e.target as HTMLElement).tagName === 'TEXTAREA') return
+        e.preventDefault()
         span('nav_new_select', { item: 'project', method: 'hotkey', context_project_id: currentProjectId ?? null })
         window.dispatchEvent(new Event('open-new-project'))
       }
