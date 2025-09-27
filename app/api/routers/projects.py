@@ -741,6 +741,8 @@ def list_projects(
     tags: list[str] = Query(default_factory=list, alias="tags[]"),
     language: list[str] = Query(default_factory=list, alias="language[]"),
     owner: str | None = None,
+    status: str | None = Query(default=None),
+    group: list[str] = Query(default_factory=list, alias="group[]"),
     updated_after: str | None = None,
     updated_before: str | None = None,
     sort: str | None = "-updated",
