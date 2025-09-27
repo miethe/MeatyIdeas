@@ -30,6 +30,7 @@ import { ProjectEditDialog } from '@/components/projects/project-edit-dialog'
 import { ProjectGroupsDialog } from '@/components/projects/project-groups-dialog'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Badge } from '@/components/ui/badge'
+import { GroupBadge } from '@/components/projects/group-badge'
 
 export default function ProjectPage() {
   const params = useParams<{ project: string }>()
@@ -124,18 +125,15 @@ export default function ProjectPage() {
   }, [])
 
   return (
-    <AppShell>
+    <AppShell currentProjectId={projectId}>
       {projectId && <ProjectEvents projectId={projectId} />}
       <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
         <div className="flex-1">
           <h1 className="text-2xl font-bold">{proj.data?.name || 'Project'}</h1>
           {proj.data?.groups && proj.data.groups.length > 0 && (
-            <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+            <div className="mt-2 flex flex-wrap items-center gap-2">
               {proj.data.groups.map((group) => (
-                <Badge key={group.id} variant="outline" className="flex items-center gap-2">
-                  <span className="h-2 w-2 rounded-full" style={{ backgroundColor: group.color || 'var(--primary)' }} />
-                  <span className="font-medium text-foreground">{group.name}</span>
-                </Badge>
+                <GroupBadge key={group.id} name={group.name} color={group.color} />
               ))}
             </div>
           )}

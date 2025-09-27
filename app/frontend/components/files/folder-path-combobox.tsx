@@ -12,7 +12,7 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { span } from '@/lib/telemetry'
 
 export type FolderPathComboboxProps = {
-  projectId: string
+  projectId?: string
   value: string
   onChange: (next: string) => void
   placeholder?: string
@@ -35,8 +35,9 @@ export function FolderPathCombobox({
   const containerRef = React.useRef<HTMLDivElement | null>(null)
 
   const dirsQuery = useQuery({
-    queryKey: ['project-dirs', projectId],
+    queryKey: ['project-dirs', projectId ?? '__none__'],
     queryFn: async () => {
+      if (!projectId) return [] as DirectoryListItem[]
       const rows = await apiGet<any[]>(`/projects/${projectId}/directories`)
       return rows.map((row) => DirectoryListItemSchema.parse(row)) as DirectoryListItem[]
     },
@@ -68,11 +69,13 @@ export function FolderPathCombobox({
       onChange(next)
       setOpen(false)
       setSearch('')
-      span('file_path_selector_used', {
-        project_id: projectId,
-        mode: 'existing',
-        path: next,
-      })
+      if (projectId) {
+        span('file_path_selector_used', {
+          project_id: projectId,
+          mode: 'existing',
+          path: next,
+        })
+      }
     },
     [onChange, projectId]
   )
@@ -82,11 +85,13 @@ export function FolderPathCombobox({
     const candidate = search.trim()
     if (!candidate) return
     setOpen(false)
-    span('file_path_selector_used', {
-      project_id: projectId,
-      mode: 'create',
-      path: candidate,
-    })
+    if (projectId) {
+      span('file_path_selector_used', {
+        project_id: projectId,
+        mode: 'create',
+        path: candidate,
+      })
+    }
     onRequestCreate(candidate)
   }, [onRequestCreate, projectId, search])
 
@@ -122,11 +127,11 @@ export function FolderPathCombobox({
         variant="outline"
         className={cn('flex w-full items-center justify-between', !value && 'text-muted-foreground')}
         onClick={() => {
-          if (disabled) return
+          if (disabled || !projectId) return
           setOpen((prev) => !prev)
           setSearch(value)
         }}
-        disabled={disabled}
+        disabled={disabled || !projectId}
       >
         <span className="flex items-center gap-2 truncate">
           <FolderIcon className="h-4 w-4 text-muted-foreground" />

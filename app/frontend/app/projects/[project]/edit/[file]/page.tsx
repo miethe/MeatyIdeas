@@ -18,15 +18,18 @@ export default function EditorPage() {
         setProjectId(projectParam)
         return
       }
-      const rows = await apiGet<any[]>(`/projects`)
-      const found = rows.find((p) => p.slug === projectParam)
-      if (found) setProjectId(found.id)
+        const payload = await apiGet<any>(`/projects`)
+        let rows = [];
+        if (Array.isArray(payload)) rows = payload;
+        else if (payload && Array.isArray(payload.projects)) rows = payload.projects;
+    const found = rows.find((p: any) => p.slug === projectParam);
+        if (found) setProjectId(found.id);
     }
     resolveProject()
   }, [projectParam])
 
   return (
-    <AppShell>
+    <AppShell currentProjectId={projectId}>
       <div className="mb-4">
         <h1 className="text-xl font-semibold">Editor</h1>
         <p className="text-sm text-muted-foreground">Split view with live preview, attachments, and backlinks.</p>

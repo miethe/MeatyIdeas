@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     search_filters_v2: int = 1
     tags_v2: int = 1
     project_modal: int = 0
+    project_statuses: str | None = None
+    ux_creation_dashboard_refresh: int = 0
 
     class Config:
         env_file = ".env"

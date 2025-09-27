@@ -227,6 +227,33 @@ export const FileSchema = z.object({
 })
 export type FileItem = z.infer<typeof FileSchema>
 
+export const RecentFileProjectSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  slug: z.string(),
+  color: z.string().nullable().optional(),
+})
+export type RecentFileProject = z.infer<typeof RecentFileProjectSchema>
+
+export const RecentFileEntrySchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  path: z.string(),
+  project: RecentFileProjectSchema,
+  updated_at: z.string(),
+  summary: z.string().nullable().optional(),
+  tags: z.array(z.string()).default([]),
+})
+export type RecentFileEntry = z.infer<typeof RecentFileEntrySchema>
+
+export const RecentFilesResponseSchema = z.object({
+  items: z.array(RecentFileEntrySchema),
+  next_cursor: z.string().nullable().optional(),
+  limit: z.number(),
+  total: z.number().nullable().optional(),
+})
+export type RecentFilesResponse = z.infer<typeof RecentFilesResponseSchema>
+
 export const SearchResultSchema = z.object({
   type: z.enum(['project', 'file']),
   id: z.string(),

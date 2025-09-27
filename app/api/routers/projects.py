@@ -755,6 +755,7 @@ def list_projects(
 
     limit = max(1, min(limit, 50))
     normalized_view = (view or "all").lower()
+    normalized_status = (status or "").strip().lower()
 
     rows: list[Project] = db.scalars(select(Project)).all()
 
@@ -800,6 +801,8 @@ def list_projects(
             continue
         if before_dt and project.updated_at and project.updated_at > before_dt:
             continue
+        if normalized_status and (project.status or "").strip().lower() != normalized_status:
+            continue
         filtered.append(project)
 
     if owner:
@@ -808,8 +811,17 @@ def list_projects(
         if normalized_owner not in {"me", "local", "default"}:
             filtered = []
 
-    project_ids = [p.id for p in filtered]
-    group_map = _get_project_groups(db, project_ids)
+    base_project_ids = [p.id for p in filtered]
+    preliminary_group_map = _get_project_groups(db, base_project_ids) if base_project_ids else {}
+    group_filter_set = {value for value in group if value}
+    if group_filter_set:
+        filtered = [p for p in filtered if any(g.id in group_filter_set for g in preliminary_group_map.get(p.id, []))]
+        project_ids = [p.id for p in filtered]
+        group_map = _get_project_groups(db, project_ids) if project_ids else {}
+    else:
+        project_ids = base_project_ids
+        group_map = preliminary_group_map
+
     files_by_project: Dict[str, list[File]] = {pid: [] for pid in project_ids}
     if project_ids:
         file_rows = db.scalars(select(File).where(File.project_id.in_(project_ids))).all()
@@ -843,26 +855,25 @@ def list_projects(
         ]
 
     # Sorting
-    def sort_key(project: Project):
-        if sort in {"updated", "+updated"}:
-            return project.updated_at or dt.datetime.min.replace(tzinfo=dt.timezone.utc)
-        if sort in {"name", "+name"}:
-            return project.name.lower()
-        if sort in {"-name"}:
-            return project.name.lower()
-        # Default: -updated
-        return project.updated_at or dt.datetime.min.replace(tzinfo=dt.timezone.utc)
+    normalized_sort = (sort or "-updated").lower()
 
-    reverse = True
-    if sort in {"name", "+name"}:
+    if normalized_sort in {"-updated", "updated", "+updated"}:
+        key_fn = lambda project: project.updated_at or dt.datetime.min.replace(tzinfo=dt.timezone.utc)
+        reverse = normalized_sort.startswith("-")
+    elif normalized_sort in {"-created", "created", "+created"}:
+        key_fn = lambda project: project.created_at or dt.datetime.min.replace(tzinfo=dt.timezone.utc)
+        reverse = normalized_sort.startswith("-")
+    elif normalized_sort in {"name", "+name"}:
+        key_fn = lambda project: project.name.lower()
         reverse = False
-    elif sort in {"-name"}:
+    elif normalized_sort == "-name":
+        key_fn = lambda project: project.name.lower()
         reverse = True
-    elif sort in {"updated", "+updated"}:
-        reverse = False
-    elif sort in {"-updated", None, ""}:
+    else:
+        key_fn = lambda project: project.updated_at or dt.datetime.min.replace(tzinfo=dt.timezone.utc)
         reverse = True
-    filtered.sort(key=sort_key, reverse=reverse)
+
+    filtered.sort(key=key_fn, reverse=reverse)
 
     total = len(filtered)
     page_items = filtered[offset : offset + limit]
@@ -924,8 +935,11 @@ def list_projects(
             "tags": tags,
             "language": language,
             "owner": owner,
+            "status": status,
+            "group": group,
             "updated_after": updated_after,
             "updated_before": updated_before,
+            "sort": normalized_sort,
         },
     )
 

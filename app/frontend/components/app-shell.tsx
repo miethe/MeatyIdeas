@@ -6,23 +6,30 @@ import { CommandPalette } from '@/components/search-command'
 import { ThemeToggle } from '@/components/theme-toggle'
 import { Search, Plus } from 'lucide-react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { ProjectCreateSheet } from '@/components/projects/project-create-sheet'
 import { useHotkeys } from 'react-hotkeys-hook'
 import { ProfileMenu } from '@/components/profile/profile-menu'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { FileCreateDialog } from '@/components/files/file-create-dialog'
 import { ResultsModal } from '@/components/search/results-modal'
 import { useQuery } from '@tanstack/react-query'
 import { apiGet } from '@/lib/apiClient'
 import { getConfig } from '@/lib/config'
+import { span } from '@/lib/telemetry'
 
 interface AppShellProps {
   children: React.ReactNode
   sidebar?: React.ReactNode
+  currentProjectId?: string | null
 }
 
-export function AppShell({ children, sidebar }: AppShellProps) {
+export function AppShell({ children, sidebar, currentProjectId = null }: AppShellProps) {
+  const router = useRouter()
   const [resultsOpen, setResultsOpen] = React.useState(false)
   const [resultsInitial, setResultsInitial] = React.useState<any | undefined>(undefined)
-  useHotkeys('n', (e) => {
+  const [quickCreateOpen, setQuickCreateOpen] = React.useState(false)
+  const [quickCreateProjectId, setQuickCreateProjectId] = React.useState<string | null>(currentProjectId)
     if ((e.target as HTMLElement).tagName === 'INPUT' || (e.target as HTMLElement).tagName === 'TEXTAREA') return
     e.preventDefault()
     window.dispatchEvent(new Event('open-new-project'))
@@ -38,7 +45,64 @@ export function AppShell({ children, sidebar }: AppShellProps) {
     staleTime: 10_000,
   })
   const { data: appConfig } = useQuery({ queryKey: ['config'], queryFn: getConfig, staleTime: 60_000 })
+  const creationRefreshEnabled = (appConfig?.UX_CREATION_DASHBOARD_REFRESH || 0) === 1
   const resultsEnabled = (appConfig?.RESULTS_MODAL || 0) === 1
+
+  React.useEffect(() => {
+    if (!quickCreateOpen) {
+      setQuickCreateProjectId(currentProjectId)
+    }
+  }, [currentProjectId, quickCreateOpen])
+
+  React.useEffect(() => {
+    if (!creationRefreshEnabled) return undefined
+    const handler = () => {
+      setQuickCreateProjectId(currentProjectId ?? null)
+      setQuickCreateOpen(true)
+    }
+    window.addEventListener('open-new-file', handler)
+    return () => window.removeEventListener('open-new-file', handler)
+  }, [creationRefreshEnabled, currentProjectId])
+
+  useHotkeys(
+    'n',
+    (e) => {
+      const target = e.target as HTMLElement
+      const tagName = target?.tagName
+      if (tagName === 'INPUT' || tagName === 'TEXTAREA' || target?.isContentEditable) return
+      e.preventDefault()
+      if (creationRefreshEnabled) {
+        setQuickCreateProjectId(currentProjectId ?? null)
+        setQuickCreateOpen(true)
+        span('nav_new_select', { item: 'file_quick', method: 'hotkey', context_project_id: currentProjectId ?? null })
+      } else {
+        span('nav_new_select', { item: 'project', method: 'hotkey', context_project_id: currentProjectId ?? null })
+        window.dispatchEvent(new Event('open-new-project'))
+      }
+    },
+    [creationRefreshEnabled, currentProjectId]
+  )
+
+  useHotkeys(
+    'shift+n',
+    (e) => {
+      const target = e.target as HTMLElement
+      const tagName = target?.tagName
+      if (tagName === 'INPUT' || tagName === 'TEXTAREA' || target?.isContentEditable) return
+      e.preventDefault()
+      if (creationRefreshEnabled) {
+        const query = currentProjectId ? `?project=${currentProjectId}` : ''
+        setQuickCreateOpen(false)
+        setQuickCreateProjectId(currentProjectId ?? null)
+        span('nav_new_select', { item: 'file_full', method: 'hotkey', context_project_id: currentProjectId ?? null })
+        router.push(`/files/create${query}`)
+      } else {
+        span('nav_new_select', { item: 'project', method: 'hotkey', context_project_id: currentProjectId ?? null })
+        window.dispatchEvent(new Event('open-new-project'))
+      }
+    },
+    [creationRefreshEnabled, currentProjectId, router]
+  )
 
   React.useEffect(() => {
     if (!resultsEnabled) {
@@ -85,12 +149,63 @@ export function AppShell({ children, sidebar }: AppShellProps) {
               <kbd className="ml-2 hidden rounded bg-muted px-1 text-xs text-muted-foreground sm:inline">⌘K</kbd>
             </Button>
           </CommandPalette>
-          <ProjectCreateSheet>
-            <Button size="sm" className="gap-2">
-              <Plus className="h-4 w-4" />
-              <span className="hidden sm:inline">New Project</span>
-            </Button>
-          </ProjectCreateSheet>
+          {creationRefreshEnabled ? (
+            <>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button size="sm" className="gap-2">
+                    <Plus className="h-4 w-4" />
+                    <span className="hidden sm:inline">New</span>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-48">
+                  <DropdownMenuItem
+                    onSelect={(event) => {
+                      event.preventDefault()
+                      span('nav_new_select', { item: 'project', method: 'menu', context_project_id: currentProjectId ?? null })
+                      window.dispatchEvent(new Event('open-new-project'))
+                    }}
+                  >
+                    New Project
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuLabel>New File</DropdownMenuLabel>
+                  <DropdownMenuItem
+                    onSelect={(event) => {
+                      event.preventDefault()
+                      span('nav_new_select', { item: 'file_quick', method: 'menu', context_project_id: currentProjectId ?? null })
+                      setQuickCreateProjectId(currentProjectId ?? null)
+                      setQuickCreateOpen(true)
+                    }}
+                  >
+                    Quick Create
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onSelect={(event) => {
+                      event.preventDefault()
+                      const query = currentProjectId ? `?project=${currentProjectId}` : ''
+                      span('nav_new_select', { item: 'file_full', method: 'menu', context_project_id: currentProjectId ?? null })
+                      setQuickCreateOpen(false)
+                      setQuickCreateProjectId(currentProjectId ?? null)
+                      router.push(`/files/create${query}`)
+                    }}
+                  >
+                    Create…
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <ProjectCreateSheet>
+                <span className="hidden" aria-hidden="true" />
+              </ProjectCreateSheet>
+            </>
+          ) : (
+            <ProjectCreateSheet>
+              <Button size="sm" className="gap-2">
+                <Plus className="h-4 w-4" />
+                <span className="hidden sm:inline">New Project</span>
+              </Button>
+            </ProjectCreateSheet>
+          )}
           <ThemeToggle />
           <ProfileMenu />
         </div>
@@ -101,6 +216,13 @@ export function AppShell({ children, sidebar }: AppShellProps) {
       <main className={cn('row-start-2 overflow-y-auto p-6')}>{children}</main>
       {resultsEnabled && (
         <ResultsModal open={resultsOpen} onOpenChange={setResultsOpen} initial={resultsInitial} />
+      )}
+      {creationRefreshEnabled && (
+        <FileCreateDialog
+          open={quickCreateOpen}
+          onOpenChange={setQuickCreateOpen}
+          initialProjectId={quickCreateProjectId}
+        />
       )}
     </div>
   )

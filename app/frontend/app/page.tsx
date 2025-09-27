@@ -13,13 +13,18 @@ import {
   ProjectListResponseSchema,
   ProjectGroupWithProjectsSchema,
   ProjectGroupWithProjects,
+  ProjectGroupSchema,
+  ProjectGroup,
   ProjectSchema,
   Project,
+  RecentFileEntry,
 } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/skeleton'
+import { DashboardRecentFiles } from '@/components/dashboard/recent-files'
+import { GroupBadge } from '@/components/projects/group-badge'
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -32,9 +37,10 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Separator } from '@/components/ui/separator'
-import { Star, ExternalLink, Eye, Filter, MoreHorizontal, Trash2 } from 'lucide-react'
+import { Star, ExternalLink, Eye, Filter, MoreHorizontal, Trash2, Plus, ArrowUpDown } from 'lucide-react'
 import Link from 'next/link'
 import { toast } from 'sonner'
+import { span } from '@/lib/telemetry'
 import { getConfig } from '@/lib/config'
 import { ProjectDetailModal } from '@/components/projects/project-detail-modal/index'
 import { ProjectEditDialog } from '@/components/projects/project-edit-dialog'
@@ -62,6 +68,15 @@ const DENSITY_OPTIONS: Array<{ id: Density; label: string }> = [
   { id: 'compact', label: 'Compact' },
   { id: 'standard', label: 'Standard' },
   { id: 'rich', label: 'Rich' },
+]
+
+const SORT_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: '-updated', label: 'Last Updated (Newest)' },
+  { value: '+updated', label: 'Last Updated (Oldest)' },
+  { value: '+name', label: 'Name (A-Z)' },
+  { value: '-name', label: 'Name (Z-A)' },
+  { value: '-created', label: 'Date Created (Newest)' },
+  { value: '+created', label: 'Date Created (Oldest)' },
 ]
 
 function decodeList(param: string | null): string[] {
@@ -107,7 +122,10 @@ async function fetchProjects(params: {
   tags: string[]
   languages: string[]
   owner: string
+  status: string | null
+  groups: string[]
   updatedPreset: string
+  sort: string
   cursor?: string
 }): Promise<ProjectListResponse> {
   const search = new URLSearchParams()
@@ -123,9 +141,16 @@ async function fetchProjects(params: {
   if (params.owner && params.owner !== 'all') {
     search.set('owner', params.owner)
   }
+  if (params.status && params.status !== 'all') {
+    search.set('status', params.status)
+  }
+  if (params.groups.length) {
+    params.groups.forEach((groupId) => search.append('group', groupId))
+  }
   const range = resolveUpdatedRange(params.updatedPreset)
   if (range.updated_after) search.set('updated_after', range.updated_after)
   if (range.updated_before) search.set('updated_before', range.updated_before)
+  if (params.sort) search.set('sort', params.sort)
   search.set('limit', '20')
   if (params.cursor) search.set('cursor', params.cursor)
 
@@ -168,13 +193,17 @@ export default function DashboardPage() {
   const languages = decodeList(searchParams.get('languages'))
   const owner = searchParams.get('owner') ?? 'all'
   const updatedPreset = searchParams.get('updated') ?? 'any'
+  const sortParam = searchParams.get('sort') ?? '-updated'
+  const statusParam = searchParams.get('status')
   const densityParam = (searchParams.get('density') as Density | null) ?? null
 
-  const effectiveView = viewParam === 'tag' && tags.length === 0 ? 'all' : viewParam
   const { data: config } = useQuery({ queryKey: ['config'], queryFn: getConfig, staleTime: 60_000 })
+  const creationRefreshEnabled = (config?.UX_CREATION_DASHBOARD_REFRESH || 0) === 1
   const groupsEnabled = (config?.GROUPS_UI || 0) === 1
   const projectModalEnabled = (config?.PROJECT_MODAL || 0) === 1
   const searchParamString = searchParams.toString()
+  const groupFilters = React.useMemo(() => Array.from(new Set(searchParams.getAll('group'))), [searchParamString])
+  const effectiveView = viewParam === 'tag' && tags.length === 0 ? 'all' : viewParam
   const modalParam = searchParams.get('modal')
   const modalIdParam = searchParams.get('id')
   const [modalProjectId, setModalProjectId] = React.useState<string | null>(null)
@@ -232,6 +261,9 @@ export default function DashboardPage() {
   }, [densityParam])
 
   function updateParams(updates: Record<string, string | null>) {
+    if (!('cursor' in updates)) {
+      updates.cursor = null
+    }
     const next = new URLSearchParams(searchParams.toString())
     Object.entries(updates).forEach(([key, value]) => {
       if (value === null || value === '') next.delete(key)
@@ -251,7 +283,10 @@ export default function DashboardPage() {
         tags,
         languages,
         owner,
+        status: statusParam,
+        groups: groupFilters,
         updated: updatedPreset,
+        sort: sortParam,
       },
     ],
     queryFn: ({ pageParam }: { pageParam?: string }) =>
@@ -260,7 +295,10 @@ export default function DashboardPage() {
         tags,
         languages,
         owner,
+        status: statusParam,
+        groups: groupFilters,
         updatedPreset,
+        sort: sortParam,
         cursor: pageParam,
       }),
     getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
@@ -316,6 +354,37 @@ export default function DashboardPage() {
     }
     return map
   }, [tagsQuery.data])
+
+  const groupFilterQuery = useQuery({
+    queryKey: ['project-groups', 'quick-filter'],
+    queryFn: async () => {
+      const rows = await apiGet<any[]>(`/project-groups`)
+      return rows.map((row) => ProjectGroupSchema.parse(row)) as ProjectGroup[]
+    },
+    enabled: creationRefreshEnabled,
+    staleTime: 60_000,
+  })
+
+  const statusOptions = React.useMemo(() => {
+    if (!creationRefreshEnabled) return [] as Array<{ key: string; label: string; color?: string | null }>
+    return (config?.PROJECT_STATUS_OPTIONS ?? []).map((option) => ({
+      key: option.key,
+      label: option.label,
+      color: option.color ?? null,
+    }))
+  }, [config, creationRefreshEnabled])
+
+  const groupOptions = React.useMemo(() => {
+    if (!creationRefreshEnabled) return [] as ProjectGroup[]
+    const items = groupFilterQuery.data || []
+    return items
+      .slice()
+      .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+      .slice(0, 6)
+  }, [creationRefreshEnabled, groupFilterQuery.data])
+
+  const quickFiltersActive = Boolean((statusParam && statusParam !== 'all') || groupFilters.length > 0)
+  const showQuickFilterRibbon = creationRefreshEnabled && (statusOptions.length > 0 || groupOptions.length > 0 || quickFiltersActive)
 
   const groupsQuery = useQuery({
     queryKey: ['project-groups'],
@@ -447,8 +516,63 @@ export default function DashboardPage() {
     updateParams({ density: value === 'standard' ? null : value })
   }
 
+  const setGroupFilters = React.useCallback(
+    (ids: string[]) => {
+      const next = new URLSearchParams(searchParamString)
+      next.delete('group')
+      ids.forEach((id) => next.append('group', id))
+      next.delete('cursor')
+      const qs = next.toString()
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
+    },
+    [pathname, router, searchParamString]
+  )
+
+  const handleSortChange = (value: string) => {
+    updateParams({ sort: value === '-updated' ? null : value })
+    span('dashboard_sort_change', { sort_key: value })
+  }
+
+  const handleStatusFilterChange = (value: string | null) => {
+    const nextValue = value && value !== 'all' ? value : null
+    updateParams({ status: nextValue })
+    span('dashboard_filter_chip', { type: 'status', value: nextValue ?? 'all', active: Boolean(nextValue) })
+  }
+
+  const handleGroupFilterToggle = (groupId: string) => {
+    const next = new Set(groupFilters)
+    const isActive = next.has(groupId)
+    if (isActive) next.delete(groupId)
+    else next.add(groupId)
+    span('dashboard_filter_chip', { type: 'group', value: groupId, active: !isActive })
+    setGroupFilters(Array.from(next))
+  }
+
+  const handleClearQuickFilters = () => {
+    const next = new URLSearchParams(searchParamString)
+    next.delete('group')
+    next.delete('status')
+    next.delete('cursor')
+    const qs = next.toString()
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
+    span('dashboard_filter_chip', { type: 'clear', value: 'all', active: false })
+  }
+
   const handleResetFilters = () => {
-    updateParams({ tags: null, languages: null, updated: null, owner: null, view: null })
+    const next = new URLSearchParams(searchParamString)
+    next.delete('group')
+    next.delete('status')
+    next.delete('tags')
+    next.delete('languages')
+    next.delete('updated')
+    next.delete('owner')
+    next.delete('view')
+    next.delete('sort')
+    next.delete('density')
+    next.delete('cursor')
+    const qs = next.toString()
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
+    span('dashboard_filters_reset', {})
   }
 
   const handleToggleStar = (project: ProjectCard) => {
@@ -514,6 +638,18 @@ export default function DashboardPage() {
     window.open(`/projects/${project.slug}`, '_blank')
   }
 
+  const handleRecentPeek = (file: RecentFileEntry) => {
+    const slug = file.project.slug || file.project.id
+    span('recent_file_open', { file_id: file.id, project_id: file.project.id, action: 'peek' })
+    router.push(`/projects/${slug}?file=${file.id}`)
+  }
+
+  const handleRecentOpen = (file: RecentFileEntry) => {
+    const slug = file.project.slug || file.project.id
+    span('recent_file_open', { file_id: file.id, project_id: file.project.id, action: 'open' })
+    window.open(`/projects/${slug}?file=${file.id}`, '_blank')
+  }
+
   const sidebar = (
     <DashboardSidebar
       activeView={effectiveView}
@@ -547,48 +683,72 @@ export default function DashboardPage() {
   return (
     <>
       <AppShell sidebar={sidebar}>
-        <div className="flex flex-col gap-6">
-          <FilterBar
-            tags={tags}
-            tagLabelLookup={tagLabelLookup}
-            languages={languages}
-            languageOptions={languageOptions}
-            onRemoveTag={handleRemoveTag}
-            onAddTag={handleAddTag}
-            onToggleLanguage={handleToggleLanguage}
-            updatedPreset={updatedPreset}
-            onUpdatedChange={handleUpdatedChange}
-            owner={owner}
-            onOwnerChange={handleOwnerChange}
-            onReset={handleResetFilters}
-          />
-          <DensityControls density={density} onDensityChange={handleDensityChange} />
-          {projectsQuery.isLoading ? (
-            <ProjectGridSkeleton />
-          ) : allProjects.length === 0 ? (
-            <EmptyState onReset={handleResetFilters} />
-          ) : (
-            <ProjectGrid
-              projects={allProjects}
-              density={density}
-              onToggleStar={handleToggleStar}
-              onQuickPeek={handleQuickPeek}
-              onQuickOpen={handleQuickOpen}
-              onEditProject={setEditingProject}
-              onManageGroups={setGroupsProject}
-              onDeleteProject={setDeleteProject}
+        <div className={creationRefreshEnabled ? 'grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]' : 'flex flex-col gap-6'}>
+          <div className="flex flex-col gap-6">
+            <FilterBar
+              tags={tags}
+              tagLabelLookup={tagLabelLookup}
+              languages={languages}
+              languageOptions={languageOptions}
+              onRemoveTag={handleRemoveTag}
+              onAddTag={handleAddTag}
+              onToggleLanguage={handleToggleLanguage}
+              updatedPreset={updatedPreset}
+              onUpdatedChange={handleUpdatedChange}
+              owner={owner}
+              onOwnerChange={handleOwnerChange}
+              onReset={handleResetFilters}
             />
-          )}
-          {projectsQuery.hasNextPage && (
-            <div className="flex justify-center">
-              <Button
-                variant="outline"
-                onClick={() => projectsQuery.fetchNextPage()}
-                disabled={projectsQuery.isFetchingNextPage}
-              >
-                {projectsQuery.isFetchingNextPage ? 'Loading…' : 'Load more'}
-              </Button>
-            </div>
+            {showQuickFilterRibbon && (
+              <QuickFilterRibbon
+                statusOptions={statusOptions}
+                activeStatus={statusParam}
+                onStatusChange={handleStatusFilterChange}
+                groupOptions={groupOptions}
+                activeGroups={groupFilters}
+                onToggleGroup={handleGroupFilterToggle}
+                onClear={handleClearQuickFilters}
+              />
+            )}
+            {creationRefreshEnabled ? (
+              <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                <SortDropdown value={sortParam} onChange={handleSortChange} />
+                <DensityControls density={density} onDensityChange={handleDensityChange} />
+              </div>
+            ) : (
+              <DensityControls density={density} onDensityChange={handleDensityChange} />
+            )}
+            {projectsQuery.isLoading ? (
+              <ProjectGridSkeleton />
+            ) : allProjects.length === 0 ? (
+              <EmptyState onReset={handleResetFilters} />
+            ) : (
+              <ProjectGrid
+                projects={allProjects}
+                density={density}
+                showNewProjectCard={creationRefreshEnabled}
+                onToggleStar={handleToggleStar}
+                onQuickPeek={handleQuickPeek}
+                onQuickOpen={handleQuickOpen}
+                onEditProject={setEditingProject}
+                onManageGroups={setGroupsProject}
+                onDeleteProject={setDeleteProject}
+              />
+            )}
+            {projectsQuery.hasNextPage && (
+              <div className="flex justify-center">
+                <Button
+                  variant="outline"
+                  onClick={() => projectsQuery.fetchNextPage()}
+                  disabled={projectsQuery.isFetchingNextPage}
+                >
+                  {projectsQuery.isFetchingNextPage ? 'Loading…' : 'Load more'}
+                </Button>
+              </div>
+            )}
+          </div>
+          {creationRefreshEnabled && (
+            <DashboardRecentFiles onOpen={handleRecentOpen} onPeek={handleRecentPeek} />
           )}
         </div>
       </AppShell>
@@ -878,6 +1038,117 @@ function DensityControls({ density, onDensityChange }: { density: Density; onDen
   )
 }
 
+function SortDropdown({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const active = SORT_OPTIONS.find((option) => option.value === value) ?? SORT_OPTIONS[0]
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" size="sm" className="gap-2">
+          <ArrowUpDown className="h-4 w-4" />
+          <span className="text-sm font-medium">{active.label}</span>
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-56">
+        <DropdownMenuLabel>Sort By</DropdownMenuLabel>
+        <DropdownMenuRadioGroup value={value} onValueChange={onChange}>
+          {SORT_OPTIONS.map((option) => (
+            <DropdownMenuRadioItem key={option.value} value={option.value}>
+              {option.label}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+function QuickFilterRibbon({
+  statusOptions,
+  activeStatus,
+  onStatusChange,
+  groupOptions,
+  activeGroups,
+  onToggleGroup,
+  onClear,
+}: {
+  statusOptions: Array<{ key: string; label: string; color?: string | null }>
+  activeStatus: string | null
+  onStatusChange: (value: string | null) => void
+  groupOptions: ProjectGroup[]
+  activeGroups: string[]
+  onToggleGroup: (groupId: string) => void
+  onClear: () => void
+}) {
+  const hasFilters = Boolean((activeStatus && activeStatus !== 'all') || activeGroups.length > 0)
+  return (
+    <div className="rounded-md border bg-muted/20 px-3 py-3">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-1 flex-wrap items-center gap-3">
+          {statusOptions.length > 0 && (
+            <div className="flex items-center gap-2">
+              <span className="text-xs uppercase text-muted-foreground">Status</span>
+              <div className="flex flex-wrap gap-2">
+                {statusOptions.map((option) => {
+                  const isActive = activeStatus === option.key
+                  return (
+                    <button
+                      key={option.key}
+                      type="button"
+                      onClick={() => onStatusChange(isActive ? null : option.key)}
+                      className={cn(
+                        'rounded-full border px-3 py-1 text-xs font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/40',
+                        isActive
+                          ? 'border-primary bg-primary/10 text-primary'
+                          : 'border-muted-foreground/40 text-muted-foreground hover:border-primary/40 hover:text-primary'
+                      )}
+                    >
+                      {option.label}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+          {groupOptions.length > 0 && (
+            <div className="flex items-center gap-2">
+              <span className="text-xs uppercase text-muted-foreground">Groups</span>
+              <div className="flex flex-wrap gap-2">
+                {groupOptions.map((group) => {
+                  const isActive = activeGroups.includes(group.id)
+                  return (
+                    <button
+                      key={group.id}
+                      type="button"
+                      onClick={() => onToggleGroup(group.id)}
+                      className={cn(
+                        'inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/40',
+                        isActive
+                          ? 'border-primary bg-primary/10 text-primary'
+                          : 'border-muted-foreground/40 text-muted-foreground hover:border-primary/40 hover:text-primary'
+                      )}
+                    >
+                      <span
+                        className="h-2.5 w-2.5 rounded-full"
+                        style={{ backgroundColor: group.color || 'var(--primary)' }}
+                      />
+                      <span className="truncate">{group.name}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+        {hasFilters && (
+          <Button variant="ghost" size="sm" onClick={onClear} className="text-xs">
+            Clear
+          </Button>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function ProjectGridSkeleton() {
   return (
     <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -903,6 +1174,7 @@ function EmptyState({ onReset }: { onReset: () => void }) {
 function ProjectGrid({
   projects,
   density,
+  showNewProjectCard = false,
   onToggleStar,
   onQuickPeek,
   onQuickOpen,
@@ -912,6 +1184,7 @@ function ProjectGrid({
 }: {
   projects: ProjectCard[]
   density: Density
+  showNewProjectCard?: boolean
   onToggleStar: (project: ProjectCard) => void
   onQuickPeek: (project: ProjectCard) => void
   onQuickOpen: (project: ProjectCard) => void
@@ -939,7 +1212,21 @@ function ProjectGrid({
           onDeleteProject={onDeleteProject}
         />
       ))}
+      {showNewProjectCard && <NewProjectCard />}
     </div>
+  )
+}
+
+function NewProjectCard() {
+  return (
+    <button
+      type="button"
+      onClick={() => window.dispatchEvent(new Event('open-new-project'))}
+      className="flex min-h-[180px] flex-col items-center justify-center gap-3 rounded-md border-2 border-dashed border-muted-foreground/50 bg-muted/20 p-6 text-center text-sm font-medium text-muted-foreground transition hover:border-primary/60 hover:bg-muted/40 hover:text-primary"
+    >
+      <Plus className="h-6 w-6" />
+      <span>New Project</span>
+    </button>
   )
 }
 
@@ -976,24 +1263,12 @@ function ProjectCardItem({
             {project.name}
           </Link>
           {project.groups.length > 0 && (
-            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <div className="mt-2 flex flex-wrap items-center gap-2">
               {project.groups.slice(0, 2).map((group) => (
-                <span
-                  key={group.id}
-                  className="inline-flex items-center gap-1 rounded-full border border-dashed px-2 py-0.5"
-                  aria-label={`Group ${group.name}`}
-                >
-                  <span
-                    className="h-2 w-2 rounded-full"
-                    style={{ backgroundColor: group.color || 'var(--primary)' }}
-                  />
-                  <span className="font-medium text-foreground">{group.name}</span>
-                </span>
+                <GroupBadge key={group.id} name={group.name} color={group.color} />
               ))}
               {project.groups.length > 2 && (
-                <span className="inline-flex items-center rounded-full border border-dashed px-2 py-0.5 text-xs text-muted-foreground">
-                  +{project.groups.length - 2}
-                </span>
+                <span className="text-xs text-muted-foreground">+{project.groups.length - 2} more</span>
               )}
             </div>
           )}

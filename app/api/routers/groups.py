@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import List
+import re
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
@@ -29,6 +30,22 @@ router = APIRouter(
     tags=["project-groups"],
     dependencies=[Depends(require_groups_enabled)],
 )
+
+
+COLOR_HEX_RE = re.compile(r"^#(?:(?:[0-9a-fA-F]{3}){1,2})$")
+
+
+def _normalize_color(value: str | None) -> str | None:
+    if value is None:
+        return None
+    stripped = value.strip()
+    if not stripped:
+        return None
+    if not COLOR_HEX_RE.match(stripped):
+        raise HTTPException(status_code=400, detail={"code": "INVALID_COLOR", "message": "Color must be hex like #RRGGBB"})
+    if len(stripped) == 4:  # Expand short form like #abc
+        stripped = "#" + ''.join(ch * 2 for ch in stripped[1:])
+    return stripped.upper()
 
 
 def get_db():
@@ -69,7 +86,7 @@ def create_group(body: ProjectGroupCreate, db: Session = Depends(get_db)):
     next_order = 0
     if max_order:
         next_order = (max_order.sort_order or 0) + 1
-    g = ProjectGroup(name=body.name, color=body.color, sort_order=body.sort_order if body.sort_order is not None else next_order)
+    g = ProjectGroup(name=body.name, color=_normalize_color(body.color), sort_order=body.sort_order if body.sort_order is not None else next_order)
     db.add(g)
     db.commit()
     db.refresh(g)
@@ -84,7 +101,7 @@ def update_group(group_id: str, body: ProjectGroupUpdate, db: Session = Depends(
     if body.name is not None:
         g.name = body.name
     if body.color is not None:
-        g.color = body.color
+        g.color = _normalize_color(body.color)
     if body.sort_order is not None:
         g.sort_order = body.sort_order
     db.add(g)

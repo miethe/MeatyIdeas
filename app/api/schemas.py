@@ -109,6 +109,11 @@ class FileCreate(BaseModel):
     rewrite_links: bool = True
 
 
+class FileCreateWithProject(FileCreate):
+    project_id: str
+    template_id: str | None = None
+
+
 class MetadataField(BaseModel):
     key: str
     label: str
@@ -136,6 +141,30 @@ class FileRead(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class RecentFileProject(BaseModel):
+    id: str
+    name: str
+    slug: str
+    color: str | None = None
+
+
+class RecentFileEntry(BaseModel):
+    id: str
+    title: str
+    path: str
+    project: RecentFileProject
+    updated_at: dt.datetime
+    summary: str | None = None
+    tags: list[str] = Field(default_factory=list)
+
+
+class RecentFilesResponse(BaseModel):
+    items: list[RecentFileEntry]
+    next_cursor: str | None = None
+    limit: int = 0
+    total: int | None = None
 
 
 class ArtifactsConnectRequest(BaseModel):
@@ -263,6 +292,12 @@ class UserUpdate(BaseModel):
     preferences: dict[str, Any] | None = None
 
 
+class ProjectStatusOption(BaseModel):
+    key: str
+    label: str
+    color: str | None = None
+
+
 class AppConfig(BaseModel):
     GIT_INTEGRATION: int = 0
     SHARE_LINKS: int = 0
@@ -274,6 +309,8 @@ class AppConfig(BaseModel):
     SEARCH_FILTERS_V2: int = 1
     TAGS_V2: int = 1
     PROJECT_MODAL: int = 0
+    UX_CREATION_DASHBOARD_REFRESH: int = 0
+    PROJECT_STATUS_OPTIONS: list[ProjectStatusOption] = Field(default_factory=list)
 
 
 class ProjectModalQuickStat(BaseModel):

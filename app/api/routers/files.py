@@ -6,15 +6,27 @@ import hashlib
 import datetime as dt
 from typing import Any, List
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Response, Query
 from fastapi.responses import FileResponse
 from markdown_it import MarkdownIt
-from sqlalchemy import select, text
+from sqlalchemy import select, text, func
 from sqlalchemy.orm import Session
 
 from ..db import SessionLocal, engine
 from ..models import File, Project, Tag
-from ..schemas import FileCreate, FileRead, LinkInfo, MoveFileRequest, MoveFileDryRunResult, MoveFileApplyResult, FilePreviewResponse
+from ..schemas import (
+    FileCreate,
+    FileCreateWithProject,
+    FileRead,
+    LinkInfo,
+    MoveFileRequest,
+    MoveFileDryRunResult,
+    MoveFileApplyResult,
+    FilePreviewResponse,
+    RecentFilesResponse,
+    RecentFileEntry,
+    RecentFileProject,
+)
 from ..settings import settings
 from ..utils import safe_join, slugify
 import os
@@ -180,6 +192,109 @@ def _serialize_file(file_obj: File, tag_lookup: dict[str, Tag] | None = None) ->
     )
 
 
+_DEFAULT_TEMPLATE_IDS = {"blank"}
+
+
+def _get_project_or_404(db: Session, project_id: str) -> Project:
+    project = db.get(Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Project"})
+    return project
+
+
+def _apply_template_to_payload(template_id: str | None, content_md: str) -> str:
+    if not template_id:
+        return content_md
+    if template_id not in _DEFAULT_TEMPLATE_IDS:
+        raise HTTPException(status_code=400, detail={"code": "INVALID_TEMPLATE", "message": "Template not supported"})
+    return content_md
+
+
+def _create_file_internal(
+    db: Session,
+    project: Project,
+    body: FileCreate,
+    template_id: str | None = None,
+) -> FileRead:
+    effective_content = _apply_template_to_payload(template_id, body.content_md)
+    prepared = prepare_front_matter(effective_content, body.front_matter, body.tags)
+    tags = prepared.tags
+
+    if tags:
+        ensure_tags(db, tags)
+
+    rendered = render_markdown(prepared.body or prepared.content)
+    f = File(
+        project_id=project.id,
+        path=body.path,
+        title=body.title or os.path.basename(body.path) or "Untitled",
+        front_matter=prepared.front_matter,
+        content_md=prepared.content,
+        rendered_html=rendered,
+        tags=tags,
+    )
+    db.add(f)
+    db.commit()
+    db.refresh(f)
+
+    proj_dir = os.path.join(settings.data_dir, "projects", project.slug)
+    abs_path = safe_join(proj_dir, "files", body.path)
+    os.makedirs(os.path.dirname(abs_path), exist_ok=True)
+    with open(abs_path, "w") as fh:
+        fh.write(prepared.content)
+
+    with engine.begin() as conn:
+        index_file(
+            conn,
+            f.id,
+            _build_search_blob(f.title, prepared.body, prepared.front_matter),
+            title=f.title,
+            path=f.path,
+        )
+
+    upsert_links(db, project.id, f, prepared.body)
+    tag_lookup: dict[str, Tag] = {}
+    if tags:
+        tag_rows = db.scalars(select(Tag).where(Tag.slug.in_({slugify(tag) for tag in tags if slugify(tag)}))).all()
+        tag_lookup = {row.slug: row for row in tag_rows}
+    serialized = _serialize_file(f, tag_lookup)
+    serialized_dict = serialized.model_dump() if hasattr(serialized, "model_dump") else serialized.dict()
+    metadata_fields_payload = serialized_dict.get("metadata_fields", [])
+    tags_payload = serialized_dict.get("tags", [])
+    metadata_signature = serialized_dict.get("metadata_signature")
+    try:
+        publish_event(
+            project.id,
+            "file.created",
+            {
+                "file_id": f.id,
+                "path": f.path,
+                "title": f.title,
+                "tags": tags_payload,
+                "metadata_signature": metadata_signature,
+                "metadata_fields": metadata_fields_payload,
+                "updated_at": f.updated_at.isoformat() if f.updated_at else None,
+            },
+        )
+    except Exception:
+        pass
+    if tags_payload:
+        try:
+            publish_event(
+                project.id,
+                "file.tagged",
+                {
+                    "file_id": f.id,
+                    "tags": tags_payload,
+                    "added": tags_payload,
+                    "removed": [],
+                },
+            )
+        except Exception:
+            pass
+    return serialized
+
+
 def _build_search_blob(title: str, body: str, front_matter: dict[str, Any]) -> str:
     fm_parts: list[str] = []
     for key, value in (front_matter or {}).items():
@@ -200,81 +315,60 @@ def _build_search_blob(title: str, body: str, front_matter: dict[str, Any]) -> s
 
 @router.post("/project/{project_id}", response_model=FileRead, status_code=201)
 def create_file(project_id: str, body: FileCreate, db: Session = Depends(get_db)):
-    project = db.get(Project, project_id)
-    if not project:
-        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Project"})
-    title = body.title or os.path.basename(body.path) or "Untitled"
+    project = _get_project_or_404(db, project_id)
+    return _create_file_internal(db, project, body)
 
-    prepared = prepare_front_matter(body.content_md, body.front_matter, body.tags)
-    tags = prepared.tags
 
-    if tags:
-        ensure_tags(db, tags)
+@router.post("", response_model=FileRead, status_code=201)
+def create_file_global(body: FileCreateWithProject, db: Session = Depends(get_db)):
+    project = _get_project_or_404(db, body.project_id)
+    return _create_file_internal(db, project, body, template_id=body.template_id)
 
-    rendered = render_markdown(prepared.body or prepared.content)
-    f = File(
-        project_id=project_id,
-        path=body.path,
-        title=title,
-        front_matter=prepared.front_matter,
-        content_md=prepared.content,
-        rendered_html=rendered,
-        tags=tags,
-    )
-    db.add(f)
-    db.commit()
-    db.refresh(f)
-    # write to disk
-    proj_dir = os.path.join(settings.data_dir, "projects", project.slug)
-    abs_path = safe_join(proj_dir, "files", body.path)
-    os.makedirs(os.path.dirname(abs_path), exist_ok=True)
-    with open(abs_path, "w") as fh:
-        fh.write(prepared.content)
-    # index
-    with engine.begin() as conn:
-        index_file(conn, f.id, _build_search_blob(f.title, prepared.body, prepared.front_matter), title=f.title, path=f.path)
-    # links
-    upsert_links(db, project_id, f, prepared.body)
-    tag_lookup: dict[str, Tag] = {}
-    if tags:
-        tag_rows = db.scalars(select(Tag).where(Tag.slug.in_({slugify(tag) for tag in tags if slugify(tag)}))).all()
-        tag_lookup = {row.slug: row for row in tag_rows}
-    serialized = _serialize_file(f, tag_lookup)
-    serialized_dict = serialized.model_dump() if hasattr(serialized, "model_dump") else serialized.dict()
-    metadata_fields_payload = serialized_dict.get("metadata_fields", [])
-    tags_payload = serialized_dict.get("tags", [])
-    metadata_signature = serialized_dict.get("metadata_signature")
+
+@router.get("/recent", response_model=RecentFilesResponse)
+def list_recent_files(
+    limit: int = Query(default=5, ge=1, le=50),
+    cursor: str | None = None,
+    db: Session = Depends(get_db),
+):
     try:
-        publish_event(
-            project_id,
-            "file.created",
-            {
-                "file_id": f.id,
-                "path": f.path,
-                "title": f.title,
-                "tags": tags_payload,
-                "metadata_signature": metadata_signature,
-                "metadata_fields": metadata_fields_payload,
-                "updated_at": f.updated_at.isoformat() if f.updated_at else None,
-            },
-        )
-    except Exception:
-        pass
-    if tags_payload:
-        try:
-            publish_event(
-                project_id,
-                "file.tagged",
-                {
-                    "file_id": f.id,
-                    "tags": tags_payload,
-                    "added": tags_payload,
-                    "removed": [],
-                },
+        offset = int(cursor) if cursor else 0
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={"code": "BAD_CURSOR", "message": "Cursor must be integer"}) from exc
+
+    limit = max(1, min(limit, 50))
+
+    rows = db.execute(
+        select(File, Project)
+        .join(Project, File.project_id == Project.id)
+        .order_by(File.updated_at.desc())
+        .offset(offset)
+        .limit(limit + 1)
+    ).all()
+
+    items: list[RecentFileEntry] = []
+    for file_obj, project in rows[:limit]:
+        updated_at = (file_obj.updated_at or dt.datetime.now(tz=dt.timezone.utc)).isoformat()
+        items.append(
+            RecentFileEntry(
+                id=file_obj.id,
+                title=file_obj.title,
+                path=file_obj.path,
+                updated_at=updated_at,
+                summary=None,
+                project=RecentFileProject(
+                    id=project.id,
+                    name=project.name,
+                    slug=project.slug,
+                    color=getattr(project, "color", None),
+                ),
+                tags=list(file_obj.tags or []),
             )
-        except Exception:
-            pass
-    return serialized
+        )
+
+    next_cursor = str(offset + limit) if len(rows) > limit else None
+    total = db.scalar(select(func.count(File.id)))
+    return RecentFilesResponse(items=items, next_cursor=next_cursor, limit=limit, total=total)
 
 
 @router.get("/{file_id}", response_model=FileRead)
