@@ -11,7 +11,10 @@ Phase 3 introduces persisted directories, a richer file tree, and drag-and-drop.
 UI
 - File tree now supports expand/collapse, multi-select (Cmd/Ctrl/Shift), drag files into folders, and basic folder actions (create/rename/delete).
 - Tree auto-refreshes within ~300 ms via server-sent events on folder/file updates.
+- Creating files now uses a folder picker/combobox — choose an existing directory or launch the new folder dialog without typing raw paths. Filenames are suggested from the title and must be unique within the selected folder.
+- “New folder” buttons open an app-native dialog that mirrors the file picker, including parent selection and validation feedback.
 
 Notes
 - Paths cannot include `..`, `\\`, or `:` and must be relative to project root.
 - Directory persistence is gated by `DIRS_PERSIST` feature flag.
+- Realtime refresh and path picker features ship under `project_file_ux_refresh`; keep it enabled for QA until telemetry is stable.

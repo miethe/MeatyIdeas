@@ -8,7 +8,8 @@ import { apiGet, apiJson } from '@/lib/apiClient'
 import { AppShell } from '@/components/app-shell'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/skeleton'
-import { FileItem, FileSchema, Project, ProjectSchema } from '@/lib/types'
+import { Project, ProjectSchema } from '@/lib/types'
+import { normalizeFiles, NormalizedFile } from '@/lib/files/normalizeFile'
 import { ItemModalViewer } from '@/components/item-modal-viewer'
 import { FileCreateDialog } from '@/components/files/file-create-dialog'
 import { Button } from '@/components/ui/button'
@@ -23,6 +24,7 @@ import { ProjectEvents } from '@/components/projects/project-events'
 import { FileTree } from '@/components/files/file-tree'
 import { FileIcon } from '@/components/files/file-icon'
 import { TagChip, OverflowTagChip } from '@/components/tags/tag-chip'
+import { FileMetadataList } from '@/components/files/file-metadata-list'
 import { ProjectActionsMenu } from '@/components/projects/project-actions-menu'
 import { ProjectEditDialog } from '@/components/projects/project-edit-dialog'
 import { ProjectGroupsDialog } from '@/components/projects/project-groups-dialog'
@@ -35,7 +37,7 @@ export default function ProjectPage() {
   const openFileId = search.get('file')
   const projectParam = params.project
   const [projectId, setProjectId] = useState<string | null>(null)
-  const [selected, setSelected] = useState<FileItem | null>(null)
+  const [selected, setSelected] = useState<NormalizedFile | null>(null)
   const [gitEnabled, setGitEnabled] = useState(false)
   const [shareEnabled, setShareEnabled] = useState(false)
   const [dirsEnabled, setDirsEnabled] = useState(false)
@@ -80,7 +82,7 @@ export default function ProjectPage() {
     queryKey: ['files', projectId],
     queryFn: async () => {
       const rows = await apiGet<any[]>(`/projects/${projectId}/files`)
-      return rows.map((r) => FileSchema.parse(r)) as FileItem[]
+      return normalizeFiles(rows)
     },
     enabled: !!projectId,
   })
@@ -185,6 +187,7 @@ export default function ProjectPage() {
             const tags = f.tag_details?.slice(0, 3) ?? []
             const overflowTags = f.tag_details && f.tag_details.length > 3 ? f.tag_details.slice(3) : []
             const extension = f.path.includes('.') ? (f.path.split('.').pop()?.toLowerCase() ?? null) : null
+            const statusField = f.metadataByKey?.status
             return (
               <Card
                 key={f.id}
@@ -200,6 +203,11 @@ export default function ProjectPage() {
                     <div className="min-w-0 flex-1">
                       <CardTitle className="truncate text-base font-semibold">{f.title}</CardTitle>
                       <div className="truncate text-xs text-muted-foreground">{f.path}</div>
+                      {statusField && (
+                        <Badge variant="outline" className="mt-2 text-[10px] uppercase">
+                          {statusField.value}
+                        </Badge>
+                      )}
                       {tags.length > 0 && (
                         <div className="mt-2 flex flex-wrap gap-1">
                           {tags.map((tag) => (
@@ -215,6 +223,11 @@ export default function ProjectPage() {
                   <p className="min-h-[2.5rem] text-sm text-muted-foreground">
                     {f.summary || 'No description yet.'}
                   </p>
+                  {Array.isArray(f.metadata_fields) && f.metadata_fields.length > 0 && (
+                    <div className="mt-3 border-t pt-3">
+                      <FileMetadataList fields={f.metadata_fields} maxVisible={3} dense />
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             )

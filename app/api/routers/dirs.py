@@ -87,7 +87,10 @@ def create_dir(project_id: str, body: DirectoryCreate, db: Session = Depends(get
     proj_dir = os.path.join(settings.data_dir, "projects", proj.slug)
     abs_dir = safe_join(proj_dir, "files", norm)
     os.makedirs(abs_dir, exist_ok=True)
-    publish_event(project_id, "dir.created", {"path": norm})
+    try:
+        publish_event(project_id, "dir.created", {"path": norm})
+    except Exception:
+        pass
     _log_dir_event("dir.create", project_id, start, path=norm)
     return d
 
@@ -187,7 +190,13 @@ def move_dir(project_id: str, body: DirectoryMoveRequest, db: Session = Depends(
         except Exception:
             pass
 
-    publish_event(project_id, "dir.moved", {"old_path": old_norm, "new_path": new_norm, "dirs": len(dir_changes), "files": len(file_moves)})
+    event_payload = {"old_path": old_norm, "new_path": new_norm, "dirs": len(dir_changes), "files": len(file_moves)}
+    try:
+        publish_event(project_id, "dir.moved", event_payload)
+        if old_norm != new_norm:
+            publish_event(project_id, "dir.renamed", event_payload)
+    except Exception:
+        pass
     _log_dir_event(
         "dir.move",
         project_id,
@@ -244,6 +253,9 @@ def delete_dir(project_id: str, body: DirectoryDeleteRequest, db: Session = Depe
     except Exception:
         pass
 
-    publish_event(project_id, "dir.deleted", {"path": norm, "removed": removed})
+    try:
+        publish_event(project_id, "dir.deleted", {"path": norm, "removed": removed})
+    except Exception:
+        pass
     _log_dir_event("dir.delete", project_id, start, path=norm, removed_dirs=removed, forced=bool(body.force))
     return DirectoryDeleteResult(deleted=True, removed_dirs=removed)

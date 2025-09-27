@@ -8,7 +8,8 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
 import { Separator } from '@/components/ui/separator'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { apiGet, apiJson } from '@/lib/apiClient'
-import { FileItem, FileSchema } from '@/lib/types'
+import { FileItem } from '@/lib/types'
+import { normalizeFile } from '@/lib/files/normalizeFile'
 
 type Props = {
   projectId: string
@@ -77,7 +78,7 @@ export function RichEditor({ projectId, fileId }: Props) {
   useEffect(() => {
     async function load() {
       const f = await apiGet<any>(`/files/${fileId}`)
-      const fi = FileSchema.parse(f)
+      const fi = normalizeFile(f)
       setFile(fi)
       setTitle(fi.title)
       setPath(fi.path)
@@ -89,7 +90,7 @@ export function RichEditor({ projectId, fileId }: Props) {
       } catch {}
       try {
         const bl = await apiGet<any[]>(`/files/${fi.id}/backlinks`)
-        setBacklinks(bl.map((b) => FileSchema.parse(b)))
+        setBacklinks(bl.map((b) => normalizeFile(b)))
       } catch {}
       try {
         const ol = await apiGet<any[]>(`/files/${fi.id}/links`)
@@ -133,7 +134,7 @@ export function RichEditor({ projectId, fileId }: Props) {
           toast.success('Saved')
           setLastSaved({ title, path, content })
           // refresh links/backlinks
-          apiGet<any[]>(`/files/${file.id}/backlinks`).then((bl) => setBacklinks(bl.map((b) => FileSchema.parse(b)))).catch(() => {})
+          apiGet<any[]>(`/files/${file.id}/backlinks`).then((bl) => setBacklinks(bl.map((b) => normalizeFile(b)))).catch(() => {})
           apiGet<any[]>(`/files/${file.id}/links`).then((ol) => setOutLinks(ol as any)).catch(() => {})
         })
       }
@@ -402,7 +403,7 @@ export function RichEditor({ projectId, fileId }: Props) {
     async function load() {
       try {
         const projFiles = await apiGet<any[]>(`/projects/${projectId}/files`)
-        setAllFiles(projFiles.map((r) => FileSchema.parse(r)))
+        setAllFiles(projFiles.map((r) => normalizeFile(r)))
       } catch {}
     }
     load()

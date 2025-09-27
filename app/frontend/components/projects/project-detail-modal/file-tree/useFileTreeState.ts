@@ -3,6 +3,8 @@ import { toast } from 'sonner'
 
 import { apiGet } from '@/lib/apiClient'
 import { ProjectTreeNode, ProjectTreeResponseSchema } from '@/lib/types'
+import { useProjectEvents } from '@/lib/events/project-events'
+import type { ProjectEventMessage } from '@/lib/events/project-events'
 
 import { EXPANSION_KEY_PREFIX, READ_FOCUS_KEY_PREFIX } from '../constants'
 import { ModalTreeState, TreeSelection, VisibleTreeRow } from '../types'
@@ -36,6 +38,7 @@ export function useFileTreeState({ projectId, open }: UseFileTreeStateArgs): Use
   const [treeState, setTreeState] = React.useState<ModalTreeState>({ nodes: {}, children: {} })
   const treeStateRef = React.useRef(treeState)
   const [expandedPaths, setExpandedPaths] = React.useState<Set<string>>(new Set())
+  const expandedPathsRef = React.useRef<Set<string>>(new Set())
   const [selected, setSelected] = React.useState<TreeSelection | null>(null)
   const [focusedPath, setFocusedPath] = React.useState<string | null>(null)
   const focusRef = React.useRef<string | null>(null)
@@ -44,6 +47,7 @@ export function useFileTreeState({ projectId, open }: UseFileTreeStateArgs): Use
   const [isSearching, setIsSearching] = React.useState(false)
   const searchDebounceRef = React.useRef<number | null>(null)
   const searchInputRef = React.useRef<HTMLInputElement>(null)
+  const refreshTimerRef = React.useRef<number | null>(null)
 
   React.useEffect(() => {
     treeStateRef.current = treeState
@@ -54,8 +58,18 @@ export function useFileTreeState({ projectId, open }: UseFileTreeStateArgs): Use
   }, [focusedPath])
 
   React.useEffect(() => {
+    expandedPathsRef.current = new Set(expandedPaths)
+  }, [expandedPaths])
+
+  React.useEffect(() => {
     return () => {
       if (searchDebounceRef.current) window.clearTimeout(searchDebounceRef.current)
+    }
+  }, [])
+
+  React.useEffect(() => {
+    return () => {
+      if (refreshTimerRef.current) window.clearTimeout(refreshTimerRef.current)
     }
   }, [])
 
@@ -98,6 +112,19 @@ export function useFileTreeState({ projectId, open }: UseFileTreeStateArgs): Use
     },
     [projectId]
   )
+
+  const refreshTree = React.useCallback(async () => {
+    if (!projectId) return
+    try {
+      await fetchChildren('')
+      const expanded = Array.from(expandedPathsRef.current)
+      for (const path of expanded) {
+        if (path) await fetchChildren(path)
+      }
+    } catch (error) {
+      console.error('Project modal tree refresh failed', error)
+    }
+  }, [fetchChildren, projectId])
 
   const findNode = React.useCallback((path: string) => treeStateRef.current.nodes[path], [])
 
@@ -173,6 +200,27 @@ export function useFileTreeState({ projectId, open }: UseFileTreeStateArgs): Use
     setSelected(null)
     fetchChildren('').catch(() => {})
   }, [fetchChildren, open, projectId])
+
+  const scheduleRefresh = React.useCallback(() => {
+    if (refreshTimerRef.current) return
+    refreshTimerRef.current = window.setTimeout(() => {
+      refreshTimerRef.current = null
+      refreshTree().catch(() => {})
+    }, 150)
+  }, [refreshTree])
+
+  useProjectEvents(
+    projectId,
+    React.useCallback(
+      (event: ProjectEventMessage) => {
+        const type = event.type
+        if (type.startsWith('file.') || type.startsWith('dir.') || type === 'files.batch_moved') {
+          scheduleRefresh()
+        }
+      },
+      [scheduleRefresh]
+    )
+  )
 
   const visibleRows = React.useMemo<VisibleTreeRow[]>(() => {
     if (searchResults) {

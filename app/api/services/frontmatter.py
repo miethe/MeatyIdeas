@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Iterable
 
+import hashlib
+import json
 import re
 
 import yaml
@@ -211,3 +213,104 @@ def summarize_markdown(content: str, limit: int = 180) -> str | None:
     if len(text) <= limit:
         return text
     return text[: limit - 1].rstrip() + "…"
+
+
+_EXCLUDED_METADATA_KEYS = {"tags", "links", "description", "icon", "title", "summary"}
+_METADATA_LABELS: dict[str, str] = {
+    "status": "Status",
+    "owner": "Owner",
+    "assignee": "Assignee",
+    "category": "Category",
+    "type": "Type",
+    "stage": "Stage",
+    "priority": "Priority",
+    "due_date": "Due Date",
+    "last_updated": "Last Updated",
+    "last_reviewed": "Last Reviewed",
+    "owner_email": "Owner Email",
+    "confidence": "Confidence",
+    "effort": "Effort",
+}
+_DATE_KEYS = {"due_date", "last_updated", "last_reviewed"}
+
+
+def _stringify_value(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return "Yes" if value else "No"
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, str):
+        text = value.strip()
+        return text or None
+    if isinstance(value, (list, tuple, set)):
+        parts: list[str] = []
+        for item in value:
+            rendered = _stringify_value(item)
+            if rendered:
+                parts.append(rendered)
+        if not parts:
+            return None
+        # Preserve order while de-duplicating
+        unique_parts: list[str] = []
+        seen: set[str] = set()
+        for part in parts:
+            if part in seen:
+                continue
+            seen.add(part)
+            unique_parts.append(part)
+        return ", ".join(unique_parts)
+    if isinstance(value, dict):
+        parts: list[str] = []
+        for key, val in value.items():
+            rendered = _stringify_value(val)
+            if rendered:
+                parts.append(f"{key}: {rendered}")
+        if not parts:
+            return None
+        return ", ".join(parts)
+    return str(value)
+
+
+def build_metadata_fields(front_matter: dict[str, Any] | None) -> list[dict[str, Any]]:
+    if not front_matter:
+        return []
+    fields: list[dict[str, Any]] = []
+    prioritized_keys = list(_METADATA_LABELS.keys())
+    remaining_keys = [
+        key
+        for key in front_matter.keys()
+        if key not in prioritized_keys and key not in _EXCLUDED_METADATA_KEYS
+    ]
+    ordered_keys = prioritized_keys + remaining_keys
+
+    for key in ordered_keys:
+        if key in _EXCLUDED_METADATA_KEYS or key not in front_matter:
+            continue
+        rendered = _stringify_value(front_matter.get(key))
+        if not rendered:
+            continue
+        fields.append(
+            {
+                "key": key,
+                "label": _METADATA_LABELS.get(key, key.replace('_', ' ').title()),
+                "value": rendered,
+                "kind": "date" if key in _DATE_KEYS else None,
+            }
+        )
+
+    return fields
+
+
+def build_metadata_signature(front_matter: dict[str, Any] | None) -> str | None:
+    if not front_matter:
+        return None
+    filtered = {k: v for k, v in front_matter.items() if k not in _EXCLUDED_METADATA_KEYS}
+    if not filtered:
+        return None
+    try:
+        payload = json.dumps(filtered, sort_keys=True, default=str)
+    except Exception:
+        payload = str(filtered)
+    return hashlib.md5(payload.encode("utf-8")).hexdigest()

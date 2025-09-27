@@ -35,12 +35,19 @@ from ..schemas import (
     ProjectActivityResponse,
     ProjectActivityEntry,
     ProjectGroupRead,
+    DirectoryListItem,
 )
 from ..settings import settings
 from ..utils import slugify, safe_join
 import shutil
 from ..services.tagging import get_project_tag_details, set_project_tags
-from ..services.frontmatter import build_tag_details, extract_front_matter, summarize_markdown
+from ..services.frontmatter import (
+    build_tag_details,
+    extract_front_matter,
+    summarize_markdown,
+    build_metadata_fields,
+    build_metadata_signature,
+)
 from ..git_ops import repo_history, GitError
 
 
@@ -1166,6 +1173,8 @@ def list_project_files(project_id: str, db: Session = Depends(get_db)):
                 summary_value = description_value[:179].rstrip() + '…'
             else:
                 summary_value = description_value or summary_text
+            metadata_fields = build_metadata_fields(front_matter)
+            metadata_signature = build_metadata_signature(front_matter)
             payload.append(
                 FileRead(
                     id=f.id,
@@ -1182,6 +1191,8 @@ def list_project_files(project_id: str, db: Session = Depends(get_db)):
                     tag_details=build_tag_details(tags, tag_lookup),
                     summary=summary_value,
                     updated_at=f.updated_at,
+                    metadata_fields=metadata_fields,
+                    metadata_signature=metadata_signature,
                 )
             )
 
@@ -1328,4 +1339,69 @@ def get_project_files_tree(
 
         items = prune(items, 1)
 
+    return items
+
+
+@router.get("/{project_id}/directories", response_model=list[DirectoryListItem])
+def list_project_directories(project_id: str, db: Session = Depends(get_db)):
+    project = db.get(Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND"})
+
+    directory_map: dict[str, dict[str, object]] = {}
+
+    files = db.scalars(select(File).where(File.project_id == project_id)).all()
+    for file_row in files:
+        if not file_row.path:
+            continue
+        parts = [seg for seg in file_row.path.split("/") if seg]
+        if len(parts) <= 1:
+            continue
+        for depth in range(1, len(parts)):
+            dir_path = "/".join(parts[:depth])
+            name = parts[depth - 1]
+            entry = directory_map.get(dir_path)
+            updated_at = file_row.updated_at
+            if entry:
+                existing_updated = entry.get("updated_at")
+                if updated_at and (
+                    existing_updated is None
+                    or (
+                        isinstance(existing_updated, dt.datetime)
+                        and updated_at > existing_updated
+                    )
+                ):
+                    entry["updated_at"] = updated_at
+            else:
+                directory_map[dir_path] = {
+                    "path": dir_path,
+                    "name": name,
+                    "depth": depth,
+                    "updated_at": updated_at,
+                    "source": "derived",
+                }
+
+    try:
+        dir_rows = db.scalars(select(Directory).where(Directory.project_id == project_id)).all()
+    except Exception:
+        dir_rows = []
+
+    for d in dir_rows:
+        if not d.path:
+            continue
+        depth = len([seg for seg in d.path.split("/") if seg]) or 1
+        updated_at = getattr(d, "updated_at", None)
+        record = {
+            "path": d.path,
+            "name": d.name or d.path.split("/")[-1],
+            "depth": depth,
+            "updated_at": updated_at,
+            "source": "persisted",
+        }
+        if d.path in directory_map:
+            directory_map[d.path].update(record)
+        else:
+            directory_map[d.path] = record
+
+    items = sorted(directory_map.values(), key=lambda item: str(item.get("path", "")))
     return items

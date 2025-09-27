@@ -9,6 +9,8 @@ import { toast } from 'sonner'
 import { span } from '@/lib/telemetry'
 import { MarkdownViewer } from '@/components/markdown-viewer'
 import { ImagePreview } from '@/components/files/image-preview'
+import { FileMetadataList } from '@/components/files/file-metadata-list'
+import { TagChip, OverflowTagChip } from '@/components/tags/tag-chip'
 
 type Props = { file: FileItem | null; onClose: () => void; projectId?: string; onDeleted?: () => void }
 
@@ -88,6 +90,19 @@ export function ItemModalViewer({ file, onClose, projectId, onDeleted }: Props) 
                 <>
                   <h1 className="mb-2 text-2xl font-bold">{file.title}</h1>
                   <div className="mb-4 text-sm text-muted-foreground">{file.path}</div>
+                  {file.tag_details && file.tag_details.length > 0 && (
+                    <div className="mb-4 flex flex-wrap gap-1">
+                      {file.tag_details.slice(0, 6).map((tag) => (
+                        <TagChip key={tag.slug} tag={tag} maxWidth={140} />
+                      ))}
+                      {file.tag_details.length > 6 && <OverflowTagChip overflow={file.tag_details.slice(6)} />}
+                    </div>
+                  )}
+                  {file.metadata_fields && file.metadata_fields.length > 0 && (
+                    <div className="mb-6">
+                      <FileMetadataList fields={file.metadata_fields} />
+                    </div>
+                  )}
                   {isImageFile ? (
                     <ImagePreview
                       src={`/projects/${file.project_id}/files/raw?path=${encodeURIComponent(file.path)}`}

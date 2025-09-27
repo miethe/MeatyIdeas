@@ -26,6 +26,7 @@ import { PreviewTab } from './sections/PreviewTab'
 import { ActivityTab } from './sections/ActivityTab'
 import { LAST_TAB_KEY } from './constants'
 import { ProjectModalTab } from './types'
+import { useFileDetails } from './hooks/useFileDetails'
 
 type Props = {
   projectId: string | null
@@ -70,6 +71,7 @@ export function ProjectDetailModal({ projectId, open, onOpenChange, onAfterClose
 
   const summaryQuery = useProjectSummary(projectId, open)
   const previewQuery = useProjectPreview(projectId, selected?.fileId ?? null, open)
+  const fileDetailsQuery = useFileDetails(selected?.fileId ?? null, open)
   const activityQuery = useProjectActivity(projectId, open && activeTab === 'activity')
   const starMutation = useStarProject(projectId)
   const { highlightedHtml, isHighlighting } = usePrismHighlight(previewQuery.data)
@@ -256,6 +258,8 @@ export function ProjectDetailModal({ projectId, open, onOpenChange, onAfterClose
                       error={previewQuery.error}
                       highlightedHtml={highlightedHtml}
                       isHighlighting={isHighlighting}
+                      fileDetails={fileDetailsQuery.data}
+                      metadataLoading={fileDetailsQuery.isLoading}
                     />
                   </TabsContent>
                   <TabsContent value="activity" className="flex-1 overflow-hidden">

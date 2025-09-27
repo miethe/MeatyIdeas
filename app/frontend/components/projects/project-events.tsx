@@ -1,61 +1,81 @@
 "use client"
-import React, { useEffect, useRef } from 'react'
+import React from 'react'
 import { toast } from 'sonner'
-import { getApiBase, getToken } from '@/lib/apiClient'
+import { useQueryClient } from '@tanstack/react-query'
+
+import { useProjectEvents } from '@/lib/events/project-events'
+import { span } from '@/lib/telemetry'
 
 type Props = { projectId: string }
 
 export function ProjectEvents({ projectId }: Props) {
-  const esRef = useRef<EventSource | null>(null)
+  const qc = useQueryClient()
+  const fileInvalidateRef = React.useRef<number | null>(null)
+  const dirInvalidateRef = React.useRef<number | null>(null)
 
-  useEffect(() => {
-    if (!projectId) return
+  const scheduleInvalidate = React.useCallback(
+    (type: 'files' | 'dirs') => {
+      if (!projectId) return
+      const ref = type === 'files' ? fileInvalidateRef : dirInvalidateRef
+      if (ref.current) return
+      ref.current = window.setTimeout(() => {
+        if (type === 'files') qc.invalidateQueries({ queryKey: ['files', projectId] })
+        else qc.invalidateQueries({ queryKey: ['project-dirs', projectId] })
+        ref.current = null
+      }, 150)
+    },
+    [projectId, qc]
+  )
 
-    const connect = () => {
-      const url = `${getApiBase()}/events/stream?project_id=${encodeURIComponent(projectId)}&token=${encodeURIComponent(getToken())}`
-      const es = new EventSource(url, { withCredentials: false })
-      esRef.current = es
-
-      es.onmessage = (ev) => {
-        try {
-          const data = JSON.parse(ev.data)
-          const type = data.type as string
-          if (type === 'bundle.started') {
-            toast.info('Bundle started')
-          } else if (type === 'bundle.completed') {
-            toast.success('Bundle completed')
-          } else if (type === 'bundle.branch_pushed') {
-            toast.success('Bundle branch pushed')
-          } else if (type === 'bundle.pr_opened') {
-            toast.success('PR opened for bundle')
-          } else if (type === 'commit.started') {
-            toast.info('Commit started')
-          } else if (type === 'commit.completed') {
-            toast.success('Commit completed')
-          } else if (type === 'commit.failed') {
-            toast.error(`Commit failed: ${data.payload?.code || 'error'}`)
-          }
-        } catch {
-          // ignore malformed
-        }
-      }
-
-      es.onerror = () => {
-        // quietly retry by recreating after delay
-        es.close()
-        setTimeout(connect, 2000)
-      }
-    }
-
-    connect()
-
+  React.useEffect(() => {
     return () => {
-      if (esRef.current) {
-        esRef.current.close()
-        esRef.current = null
-      }
+      if (fileInvalidateRef.current) window.clearTimeout(fileInvalidateRef.current)
+      if (dirInvalidateRef.current) window.clearTimeout(dirInvalidateRef.current)
     }
-  }, [projectId])
+  }, [])
+
+  const handleEvent = React.useCallback(
+    (event: { type: string; payload?: Record<string, unknown> }) => {
+      const { type, payload } = event
+      if (type === 'bundle.started') {
+        toast.info('Bundle started')
+      } else if (type === 'bundle.completed') {
+        toast.success('Bundle completed')
+      } else if (type === 'bundle.branch_pushed') {
+        toast.success('Bundle branch pushed')
+      } else if (type === 'bundle.pr_opened') {
+        toast.success('PR opened for bundle')
+      } else if (type === 'commit.started') {
+        toast.info('Commit started')
+      } else if (type === 'commit.completed') {
+        toast.success('Commit completed')
+      } else if (type === 'commit.failed') {
+        toast.error(`Commit failed: ${(payload?.code as string) || 'error'}`)
+      }
+
+      if (type.startsWith('file.') || type === 'files.batch_moved') {
+        scheduleInvalidate('files')
+        const fileId = typeof payload?.file_id === 'string' ? payload.file_id : undefined
+        if (fileId) qc.invalidateQueries({ queryKey: ['file-details', fileId] })
+        span('file_sync_refresh', {
+          project_id: projectId,
+          scope: 'files',
+          reason: type,
+        })
+      }
+      if (type.startsWith('dir.')) {
+        scheduleInvalidate('dirs')
+        span('file_sync_refresh', {
+          project_id: projectId,
+          scope: 'directories',
+          reason: type,
+        })
+      }
+    },
+    [scheduleInvalidate]
+  )
+
+  useProjectEvents(projectId, handleEvent)
 
   return null
 }

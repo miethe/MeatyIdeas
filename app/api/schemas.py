@@ -109,6 +109,13 @@ class FileCreate(BaseModel):
     rewrite_links: bool = True
 
 
+class MetadataField(BaseModel):
+    key: str
+    label: str
+    value: str
+    kind: str | None = None
+
+
 class FileRead(BaseModel):
     id: str
     project_id: str
@@ -124,6 +131,8 @@ class FileRead(BaseModel):
     tag_details: list[dict[str, Any]] = Field(default_factory=list)
     summary: str | None = None
     updated_at: dt.datetime
+    metadata_fields: list[MetadataField] = Field(default_factory=list)
+    metadata_signature: str | None = None
 
     class Config:
         from_attributes = True
@@ -451,6 +460,14 @@ class DirectoryDeleteRequest(BaseModel):
 class DirectoryDeleteResult(BaseModel):
     deleted: bool
     removed_dirs: int = 0
+
+
+class DirectoryListItem(BaseModel):
+    path: str
+    name: str
+    depth: int
+    updated_at: dt.datetime | None = None
+    source: str = "derived"
 
 
 class FilesBatchMoveRequest(BaseModel):

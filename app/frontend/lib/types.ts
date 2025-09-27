@@ -52,6 +52,23 @@ export const FileLinkSchema = z.object({
 })
 export type FileLink = z.infer<typeof FileLinkSchema>
 
+export const MetadataFieldSchema = z.object({
+  key: z.string(),
+  label: z.string(),
+  value: z.string(),
+  kind: z.string().nullable().optional(),
+})
+export type MetadataField = z.infer<typeof MetadataFieldSchema>
+
+export const DirectoryListItemSchema = z.object({
+  path: z.string(),
+  name: z.string(),
+  depth: z.number(),
+  updated_at: z.string().nullable().optional(),
+  source: z.string().default('derived'),
+})
+export type DirectoryListItem = z.infer<typeof DirectoryListItemSchema>
+
 export const ProjectCardOwnerSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -205,6 +222,8 @@ export const FileSchema = z.object({
   tag_details: z.array(FileTagSchema).default([]),
   summary: z.string().nullable().optional(),
   updated_at: z.string(),
+  metadata_fields: z.array(MetadataFieldSchema).default([]),
+  metadata_signature: z.string().nullable().optional(),
 })
 export type FileItem = z.infer<typeof FileSchema>
 

@@ -24,7 +24,14 @@ import shutil
 from ..events_pub import publish_event
 from ..schemas import FilesBatchMoveRequest, FilesBatchMoveResult, FileMovePreview, DirectoryChange
 from ..models import Directory
-from ..services.frontmatter import prepare_front_matter, build_tag_details, extract_front_matter, summarize_markdown
+from ..services.frontmatter import (
+    prepare_front_matter,
+    build_tag_details,
+    extract_front_matter,
+    summarize_markdown,
+    build_metadata_fields,
+    build_metadata_signature,
+)
 from ..services.tagging import ensure_tags
 
 
@@ -151,6 +158,8 @@ def _serialize_file(file_obj: File, tag_lookup: dict[str, Tag] | None = None) ->
         truncated_description = description_value if len(description_value) <= 180 else description_value[:179].rstrip() + '…'
     else:
         truncated_description = None
+    metadata_fields = build_metadata_fields(front_matter)
+    metadata_signature = build_metadata_signature(front_matter)
     return FileRead(
         id=file_obj.id,
         project_id=file_obj.project_id,
@@ -166,6 +175,8 @@ def _serialize_file(file_obj: File, tag_lookup: dict[str, Tag] | None = None) ->
         tag_details=tag_details,
         summary=truncated_description or summary_text,
         updated_at=file_obj.updated_at,
+        metadata_fields=metadata_fields,
+        metadata_signature=metadata_signature,
     )
 
 
@@ -228,7 +239,42 @@ def create_file(project_id: str, body: FileCreate, db: Session = Depends(get_db)
     if tags:
         tag_rows = db.scalars(select(Tag).where(Tag.slug.in_({slugify(tag) for tag in tags if slugify(tag)}))).all()
         tag_lookup = {row.slug: row for row in tag_rows}
-    return _serialize_file(f, tag_lookup)
+    serialized = _serialize_file(f, tag_lookup)
+    serialized_dict = serialized.model_dump() if hasattr(serialized, "model_dump") else serialized.dict()
+    metadata_fields_payload = serialized_dict.get("metadata_fields", [])
+    tags_payload = serialized_dict.get("tags", [])
+    metadata_signature = serialized_dict.get("metadata_signature")
+    try:
+        publish_event(
+            project_id,
+            "file.created",
+            {
+                "file_id": f.id,
+                "path": f.path,
+                "title": f.title,
+                "tags": tags_payload,
+                "metadata_signature": metadata_signature,
+                "metadata_fields": metadata_fields_payload,
+                "updated_at": f.updated_at.isoformat() if f.updated_at else None,
+            },
+        )
+    except Exception:
+        pass
+    if tags_payload:
+        try:
+            publish_event(
+                project_id,
+                "file.tagged",
+                {
+                    "file_id": f.id,
+                    "tags": tags_payload,
+                    "added": tags_payload,
+                    "removed": [],
+                },
+            )
+        except Exception:
+            pass
+    return serialized
 
 
 @router.get("/{file_id}", response_model=FileRead)
@@ -355,6 +401,9 @@ def update_file(file_id: str, body: FileCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND"})
     old_title = f.title
     old_path = f.path
+    old_front_matter = dict(f.front_matter or {})
+    old_tags = set(f.tags or [])
+    old_signature = build_metadata_signature(old_front_matter)
     f.path = body.path
     f.title = body.title or f.title
     prepared = prepare_front_matter(body.content_md, body.front_matter, body.tags)
@@ -395,7 +444,61 @@ def update_file(file_id: str, body: FileCreate, db: Session = Depends(get_db)):
         slug_set = {slugify(tag) for tag in f.tags if isinstance(tag, str)}
         rows = db.scalars(select(Tag).where(Tag.slug.in_(slug_set))).all()
         tag_lookup = {row.slug: row for row in rows}
-    return _serialize_file(f, tag_lookup)
+    serialized = _serialize_file(f, tag_lookup)
+    serialized_dict = serialized.model_dump() if hasattr(serialized, "model_dump") else serialized.dict()
+    metadata_fields_payload = serialized_dict.get("metadata_fields", [])
+    metadata_signature = serialized_dict.get("metadata_signature")
+    tags_payload = serialized_dict.get("tags", [])
+
+    payload = {
+        "file_id": f.id,
+        "path": f.path,
+        "title": f.title,
+        "tags": tags_payload,
+        "metadata_signature": metadata_signature,
+        "metadata_fields": metadata_fields_payload,
+        "updated_at": f.updated_at.isoformat() if f.updated_at else None,
+    }
+    if old_path and old_path != f.path:
+        payload["old_path"] = old_path
+    if old_signature != metadata_signature:
+        payload["metadata_changed"] = True
+    try:
+        publish_event(f.project_id, "file.updated", payload)
+    except Exception:
+        pass
+
+    new_tags = set(tags_payload)
+    if new_tags != old_tags:
+        try:
+            publish_event(
+                f.project_id,
+                "file.tagged",
+                {
+                    "file_id": f.id,
+                    "tags": tags_payload,
+                    "added": sorted(new_tags - old_tags),
+                    "removed": sorted(old_tags - new_tags),
+                },
+            )
+        except Exception:
+            pass
+
+    if old_title and f.title != old_title:
+        try:
+            publish_event(
+                f.project_id,
+                "file.renamed",
+                {
+                    "file_id": f.id,
+                    "from": old_title,
+                    "to": f.title,
+                },
+            )
+        except Exception:
+            pass
+
+    return serialized
 
 
 @router.get("/{file_id}/backlinks", response_model=List[FileRead])
@@ -535,6 +638,9 @@ def delete_file(file_id: str, db: Session = Depends(get_db)):
     f = db.get(File, file_id)
     if not f:
         return
+    project_id = f.project_id
+    path = f.path
+    title = f.title
     # remove on-disk file if present
     try:
         project = db.get(Project, f.project_id)
@@ -550,6 +656,18 @@ def delete_file(file_id: str, db: Session = Depends(get_db)):
     db.commit()
     with engine.begin() as conn:
         conn.execute(text("DELETE FROM search_index WHERE file_id = :fid"), {"fid": file_id})
+    try:
+        publish_event(
+            project_id,
+            "file.deleted",
+            {
+                "file_id": file_id,
+                "path": path,
+                "title": title,
+            },
+        )
+    except Exception:
+        pass
     return
 
 

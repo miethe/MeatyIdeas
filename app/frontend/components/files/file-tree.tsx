@@ -2,13 +2,16 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 
-import { apiGet, apiJson, getApiBase, getToken } from '@/lib/apiClient'
+import { apiGet, apiJson } from '@/lib/apiClient'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { FileIcon } from '@/components/files/file-icon'
 import { OverflowTagChip, TagChip } from '@/components/tags/tag-chip'
 import { FileTag } from '@/lib/types'
 import { FileMoveDialog } from './file-move-dialog'
+import { useProjectEvents } from '@/lib/events/project-events'
+import type { ProjectEventMessage } from '@/lib/events/project-events'
+import { FolderCreateDialog } from './folder-create-dialog'
 
 type TreeNode = {
   name: string
@@ -28,44 +31,50 @@ export function FileTree({ projectId, onOpenFile }: { projectId: string; onOpenF
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [moveFile, setMoveFile] = useState<{ id: string; currentPath: string; currentTitle: string } | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
-  const esRef = useRef<EventSource | null>(null)
+  const refreshTimerRef = useRef<number | null>(null)
+  const [folderDialogOpen, setFolderDialogOpen] = useState(false)
+  const [folderDialogInitial, setFolderDialogInitial] = useState('')
 
-  useEffect(() => {
-    async function load() {
-      try {
-        const nodes = await apiGet<TreeNode[]>(`/projects/${projectId}/files/tree?include_empty_dirs=1`)
-        setTree(nodes)
-      } catch (e) {
-        // ignore
-      }
-    }
-    load()
-  }, [projectId])
-
-  // SSE refresh on directory/file events
-  useEffect(() => {
+  const fetchTree = React.useCallback(async () => {
     if (!projectId) return
-    const connect = () => {
-      const url = `${getApiBase()}/events/stream?project_id=${encodeURIComponent(projectId)}&token=${encodeURIComponent(getToken())}`
-      const es = new EventSource(url, { withCredentials: false })
-      esRef.current = es
-      es.onmessage = (ev) => {
-        try {
-          const data = JSON.parse(ev.data)
-          const type = data.type as string
-          if (type.startsWith('dir.') || type === 'file.moved' || type === 'files.batch_moved') {
-            apiGet<TreeNode[]>(`/projects/${projectId}/files/tree?include_empty_dirs=1`).then(setTree).catch(() => {})
-          }
-        } catch {}
-      }
-      es.onerror = () => {
-        es.close()
-        setTimeout(connect, 1500)
-      }
+    try {
+      const nodes = await apiGet<TreeNode[]>(`/projects/${projectId}/files/tree?include_empty_dirs=1`)
+      setTree(nodes)
+    } catch (error) {
+      console.error('Failed to load project tree', error)
     }
-    connect()
-    return () => { if (esRef.current) { esRef.current.close(); esRef.current = null } }
   }, [projectId])
+
+  useEffect(() => {
+    fetchTree().catch(() => {})
+  }, [fetchTree])
+
+  useEffect(() => {
+    return () => {
+      if (refreshTimerRef.current) window.clearTimeout(refreshTimerRef.current)
+    }
+  }, [])
+
+  const scheduleRefresh = React.useCallback(() => {
+    if (refreshTimerRef.current) return
+    refreshTimerRef.current = window.setTimeout(() => {
+      refreshTimerRef.current = null
+      fetchTree().catch(() => {})
+    }, 150)
+  }, [fetchTree])
+
+  useProjectEvents(
+    projectId,
+    React.useCallback(
+      (event: ProjectEventMessage) => {
+        const type = event.type
+        if (type.startsWith('dir.') || type.startsWith('file.') || type === 'files.batch_moved') {
+          scheduleRefresh()
+        }
+      },
+      [scheduleRefresh]
+    )
+  )
 
   function toggle(path: string) {
     setExpanded((m) => ({ ...m, [path]: !m[path] }))
@@ -99,12 +108,16 @@ export function FileTree({ projectId, onOpenFile }: { projectId: string; onOpenF
             <FileIcon type="dir" expanded={isExp} className="text-amber-500" />
             <span className="font-medium">{node.name}</span>
             <div className="ml-auto flex items-center gap-1">
-              <Button variant="ghost" size="sm" onClick={async () => {
-                const name = prompt('New folder name')
-                if (!name) return
-                const path = `${node.path}/${name}`.replaceAll('//','/')
-                try { await apiJson('POST', `/projects/${projectId}/dirs`, { path }) } catch {}
-              }}>+ Folder</Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setFolderDialogInitial(`${node.path || ''}/`)
+                  setFolderDialogOpen(true)
+                }}
+              >
+                + Folder
+              </Button>
               <Button variant="ghost" size="sm" onClick={async () => {
                 const nn = prompt('Rename folder to (path)', node.path)
                 if (!nn) return
@@ -195,11 +208,15 @@ export function FileTree({ projectId, onOpenFile }: { projectId: string; onOpenF
       <div className="border-b p-2 text-sm font-semibold flex items-center gap-2">
         <span>Files</span>
         <div className="ml-auto flex items-center gap-2">
-          <Button size="sm" onClick={async () => {
-            const name = prompt('New folder name (at root)')
-            if (!name) return
-            try { await apiJson('POST', `/projects/${projectId}/dirs`, { path: name }) } catch {}
-          }}>+ Folder</Button>
+          <Button
+            size="sm"
+            onClick={() => {
+              setFolderDialogInitial('')
+              setFolderDialogOpen(true)
+            }}
+          >
+            + Folder
+          </Button>
           {selected.size > 0 && (
             <Button size="sm" variant="outline" onClick={async () => {
               const dest = prompt('Move selected to path (folder)')
@@ -232,6 +249,15 @@ export function FileTree({ projectId, onOpenFile }: { projectId: string; onOpenF
           }}
         />
       )}
+      <FolderCreateDialog
+        projectId={projectId}
+        open={folderDialogOpen}
+        onOpenChange={(next) => setFolderDialogOpen(next)}
+        initialPath={folderDialogInitial}
+        onCreated={() => {
+          scheduleRefresh()
+        }}
+      />
     </div>
   )
 }
