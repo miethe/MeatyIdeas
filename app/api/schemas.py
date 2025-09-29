@@ -16,6 +16,7 @@ class ProjectCreate(BaseModel):
     description: str | None = ""
     tags: list[str] = Field(default_factory=list)
     status: str = "idea"
+    template_id: str | None = None
 
 
 class ProjectUpdate(BaseModel):
@@ -298,6 +299,31 @@ class ProjectStatusOption(BaseModel):
     color: str | None = None
 
 
+class FileTypeOption(BaseModel):
+    key: str
+    label: str
+    color: str | None = None
+    icon: str | None = None
+
+
+class FileTypeCreateRequest(BaseModel):
+    label: str
+    color: str | None = None
+    icon: str | None = None
+
+
+class FileTypeRead(FileTypeOption):
+    id: int
+    created_at: dt.datetime | None = None
+    updated_at: dt.datetime | None = None
+
+
+class ProjectTemplateOption(BaseModel):
+    key: str
+    label: str
+    description: str | None = None
+
+
 class AppConfig(BaseModel):
     GIT_INTEGRATION: int = 0
     SHARE_LINKS: int = 0
@@ -311,6 +337,9 @@ class AppConfig(BaseModel):
     PROJECT_MODAL: int = 0
     UX_CREATION_DASHBOARD_REFRESH: int = 0
     PROJECT_STATUS_OPTIONS: list[ProjectStatusOption] = Field(default_factory=list)
+    FILE_TYPE_OPTIONS: list[FileTypeOption] = Field(default_factory=list)
+    PROJECT_TEMPLATES: list[ProjectTemplateOption] = Field(default_factory=list)
+    CONFIG_VERSION: str = "2025-09-27-set2"
 
 
 class ProjectModalQuickStat(BaseModel):

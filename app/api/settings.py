@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     tags_v2: int = 1
     project_modal: int = 0
     project_statuses: str | None = None
+    file_types: str | None = None
+    project_templates: str | None = None
+    config_version: str = "2025-09-27-set2"
     ux_creation_dashboard_refresh: int = 0
 
     class Config:

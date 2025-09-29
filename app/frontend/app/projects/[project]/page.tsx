@@ -8,7 +8,7 @@ import { apiGet, apiJson } from '@/lib/apiClient'
 import { AppShell } from '@/components/app-shell'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/skeleton'
-import { Project, ProjectSchema } from '@/lib/types'
+import { Project, ProjectSchema, RecentFileEntry } from '@/lib/types'
 import { normalizeFiles, NormalizedFile } from '@/lib/files/normalizeFile'
 import { ItemModalViewer } from '@/components/item-modal-viewer'
 import { FileCreateDialog } from '@/components/files/file-create-dialog'
@@ -31,6 +31,25 @@ import { ProjectGroupsDialog } from '@/components/projects/project-groups-dialog
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Badge } from '@/components/ui/badge'
 import { GroupBadge } from '@/components/projects/group-badge'
+import { Plus } from 'lucide-react'
+import { DashboardRecentFiles } from '@/components/dashboard/recent-files'
+import { ProjectDetailModal } from '@/components/projects/project-detail-modal/index'
+
+function NewFileCard({ projectId, layout = 'grid' }: { projectId: string; layout?: 'grid' | 'stack' }) {
+  const sizeClasses = layout === 'grid' ? 'min-h-[180px]' : 'min-h-[128px]'
+  return (
+    <FileCreateDialog projectId={projectId}>
+      <button
+        type="button"
+        className={`flex w-full flex-col items-center justify-center gap-2 rounded-md border-2 border-dashed border-muted-foreground/40 bg-muted/20 p-4 text-sm font-medium text-muted-foreground transition hover:border-primary/60 hover:bg-muted/40 hover:text-primary ${sizeClasses}`}
+      >
+        <Plus className="h-6 w-6" />
+        <span>New File</span>
+        <span className="text-xs text-muted-foreground">Quick create</span>
+      </button>
+    </FileCreateDialog>
+  )
+}
 
 export default function ProjectPage() {
   const params = useParams<{ project: string }>()
@@ -42,11 +61,33 @@ export default function ProjectPage() {
   const [gitEnabled, setGitEnabled] = useState(false)
   const [shareEnabled, setShareEnabled] = useState(false)
   const [dirsEnabled, setDirsEnabled] = useState(false)
+  const [projectModalEnabled, setProjectModalEnabled] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
   const [groupsOpen, setGroupsOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
+  const [projectModalOpen, setProjectModalOpen] = useState(false)
   const router = useRouter()
   const qc = useQueryClient()
+
+  const handleRecentPeek = React.useCallback(
+    (file: RecentFileEntry) => {
+      const slug = file.project.slug || file.project.id
+      span('recent_file_open', { file_id: file.id, project_id: file.project.id, action: 'peek', source: 'project_page' })
+      router.push(`/projects/${slug}?file=${file.id}`)
+    },
+    [router]
+  )
+
+  const handleRecentOpen = React.useCallback((file: RecentFileEntry) => {
+    const slug = file.project.slug || file.project.id
+    span('recent_file_open', { file_id: file.id, project_id: file.project.id, action: 'open', source: 'project_page' })
+    window.open(`/projects/${slug}?file=${file.id}`, '_blank')
+  }, [])
+
+  const handleOpenProjectModal = React.useCallback(() => {
+    if (!projectModalEnabled || !projectId) return
+    setProjectModalOpen(true)
+  }, [projectModalEnabled, projectId])
 
   const projList = useQuery({
     queryKey: ['projects-nav'],
@@ -121,15 +162,27 @@ export default function ProjectPage() {
       setGitEnabled((cfg.GIT_INTEGRATION || 0) === 1)
       setShareEnabled((cfg.SHARE_LINKS || 0) === 1)
       setDirsEnabled((cfg.DIRS_PERSIST || 0) === 1)
+      setProjectModalEnabled((cfg.PROJECT_MODAL || 0) === 1)
     }))
   }, [])
 
   return (
     <AppShell currentProjectId={projectId}>
-      {projectId && <ProjectEvents projectId={projectId} />}
-      <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+      <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
+        <div className="flex-1 space-y-6">
+          {projectId && <ProjectEvents projectId={projectId} />}
+      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
         <div className="flex-1">
-          <h1 className="text-2xl font-bold">{proj.data?.name || 'Project'}</h1>
+          <h1 className="text-2xl font-bold">
+            <button
+              type="button"
+              onClick={handleOpenProjectModal}
+              disabled={!projectModalEnabled || !projectId}
+              className="truncate text-left transition hover:text-primary hover:underline disabled:cursor-not-allowed disabled:text-muted-foreground"
+            >
+              {proj.data?.name || 'Project'}
+            </button>
+          </h1>
           {proj.data?.groups && proj.data.groups.length > 0 && (
             <div className="mt-2 flex flex-wrap items-center gap-2">
               {proj.data.groups.map((group) => (
@@ -153,9 +206,6 @@ export default function ProjectPage() {
               </ShareLinksDialog>
             )}
             <ExportBundleWizard projectId={projectId} />
-            <FileCreateDialog projectId={projectId}>
-              <Button>New File</Button>
-            </FileCreateDialog>
             <ProjectActionsMenu
               onEdit={() => setEditOpen(true)}
               onManageGroups={() => setGroupsOpen(true)}
@@ -164,12 +214,12 @@ export default function ProjectPage() {
           </div>
         )}
       </div>
-      <div className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         {projectId && gitEnabled ? <ReposPanel projectId={projectId} /> : projectId && <ArtifactsPanel projectId={projectId} />}
         {projectId && <BundlesHistory projectId={projectId} />}
       </div>
       {projectId && dirsEnabled && (
-        <div className="mb-6">
+        <div>
           <FileTree projectId={projectId} onOpenFile={(fid) => setSelected(files.data?.find((x) => x.id === fid) || null)} />
         </div>
       )}
@@ -230,9 +280,36 @@ export default function ProjectPage() {
               </Card>
             )
           })}
+          {projectId && <NewFileCard projectId={projectId} />}
         </div>
       ) : (
-        <div className="rounded-lg border p-8 text-center text-muted-foreground">No files yet.</div>
+        <div className="rounded-lg border p-8 text-center">
+          <p className="text-sm text-muted-foreground">No files yet. Start by creating one.</p>
+          {projectId && (
+            <div className="mx-auto mt-4 max-w-xs">
+              <NewFileCard projectId={projectId} layout="stack" />
+            </div>
+          )}
+        </div>
+      )}
+        </div>
+        <div className="lg:w-[320px] lg:flex-shrink-0">
+          <DashboardRecentFiles onOpen={handleRecentOpen} onPeek={handleRecentPeek} />
+        </div>
+      </div>
+
+      {projectModalEnabled && projectId && (
+        <ProjectDetailModal
+          projectId={projectId}
+          open={projectModalOpen}
+          onOpenChange={(open) => setProjectModalOpen(open)}
+          onAfterClose={() => setProjectModalOpen(false)}
+          onExpand={({ slug }) => {
+            setProjectModalOpen(false)
+            router.push(`/projects/${slug}`)
+          }}
+          initialFile={null}
+        />
       )}
 
       <ItemModalViewer file={selected} onClose={() => setSelected(null)} projectId={projectId || undefined} />

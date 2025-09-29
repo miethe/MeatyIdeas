@@ -71,7 +71,14 @@ export function PreviewTab({
     return (
       <div className="flex h-full flex-col">
         <div className="border-b px-6 py-3">
-          <div className="text-sm font-medium">{preview.title}</div>
+          <button
+            type="button"
+            disabled={!projectSlug}
+            onClick={openFileInProject}
+            className="text-left text-sm font-medium transition hover:text-primary hover:underline disabled:cursor-not-allowed disabled:text-muted-foreground"
+          >
+            {preview.title}
+          </button>
           <div className="text-xs text-muted-foreground">
             {preview.path} • {preview.size.toLocaleString()} bytes
             {updated && <> • Updated {updated.toLocaleString()}</>}
@@ -101,11 +108,7 @@ export function PreviewTab({
           <p className="text-xs">This file type cannot be previewed in the modal. Open the project to view it fully.</p>
         </div>
         {summary && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => window.open(`/projects/${summary.slug}?file=${preview.id}`, '_blank')}
-          >
+          <Button variant="outline" size="sm" onClick={openFileInProject} disabled={!projectSlug}>
             <ExternalLink className="mr-2 h-4 w-4" /> Open in project
           </Button>
         )}
@@ -118,9 +121,21 @@ export function PreviewTab({
   const metadataFields = fileDetails?.metadata_fields ?? []
   const tags = fileDetails?.tag_details?.slice(0, 4) ?? []
   const overflowTags = fileDetails?.tag_details && fileDetails.tag_details.length > 4 ? fileDetails.tag_details.slice(4) : []
+  const projectSlug = summary?.slug
+  const openFileInProject = React.useCallback(() => {
+    if (!projectSlug) return
+    window.open(`/projects/${projectSlug}?file=${preview.id}`, '_blank')
+  }, [projectSlug, preview.id])
   const header = (
     <div className="border-b px-6 py-3">
-      <div className="text-sm font-medium">{preview.title}</div>
+      <button
+        type="button"
+        disabled={!projectSlug}
+        onClick={openFileInProject}
+        className="text-left text-sm font-medium transition hover:text-primary hover:underline disabled:cursor-not-allowed disabled:text-muted-foreground"
+      >
+        {preview.title}
+      </button>
       <div className="text-xs text-muted-foreground">
         {preview.path} • {preview.size.toLocaleString()} bytes
         {updated && <> • Updated {updated.toLocaleString()}</>}

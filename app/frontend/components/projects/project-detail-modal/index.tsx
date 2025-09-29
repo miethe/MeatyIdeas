@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { span } from '@/lib/telemetry'
-import { apiJson } from '@/lib/apiClient'
+import { apiGet, apiJson } from '@/lib/apiClient'
 import { ProjectEditDialog } from '@/components/projects/project-edit-dialog'
 import { ProjectGroupsDialog } from '@/components/projects/project-groups-dialog'
 
@@ -34,9 +34,10 @@ type Props = {
   onOpenChange: (open: boolean) => void
   onAfterClose?: () => void
   onExpand?: (project: { id: string; slug: string }) => void
+  initialFile?: { fileId: string | null; path: string | null } | null
 }
 
-export function ProjectDetailModal({ projectId, open, onOpenChange, onAfterClose, onExpand }: Props) {
+export function ProjectDetailModal({ projectId, open, onOpenChange, onAfterClose, onExpand, initialFile }: Props) {
   const qc = useQueryClient()
   const [activeTab, setActiveTab] = React.useState<ProjectModalTab>(() => {
     if (typeof window === 'undefined') return 'overview'
@@ -75,6 +76,7 @@ export function ProjectDetailModal({ projectId, open, onOpenChange, onAfterClose
   const activityQuery = useProjectActivity(projectId, open && activeTab === 'activity')
   const starMutation = useStarProject(projectId)
   const { highlightedHtml, isHighlighting } = usePrismHighlight(previewQuery.data)
+  const initialSelectionKeyRef = React.useRef<string | null>(null)
 
   const [autoReadmeLoadedFor, setAutoReadmeLoadedFor] = React.useState<string | null>(null)
   const [editOpen, setEditOpen] = React.useState(false)
@@ -129,6 +131,39 @@ export function ProjectDetailModal({ projectId, open, onOpenChange, onAfterClose
       })
       .catch(() => {})
   }, [autoReadmeLoadedFor, ensureVisiblePath, getNodeByPath, open, projectId, setFocusedPath, setSelected, summaryQuery.data?.readme_path])
+
+  React.useEffect(() => {
+    if (!open) {
+      initialSelectionKeyRef.current = null
+    }
+  }, [open])
+
+  React.useEffect(() => {
+    if (!open || !projectId || !initialFile) return
+    const key = `${projectId}:${initialFile.fileId ?? initialFile.path ?? ''}`
+    if (!key || initialSelectionKeyRef.current === key) return
+    initialSelectionKeyRef.current = key
+    const run = async () => {
+      try {
+        let targetPath = initialFile.path || null
+        if (!targetPath && initialFile.fileId) {
+          const fileResponse = await apiGet(`/files/${initialFile.fileId}`)
+          if (fileResponse && typeof fileResponse.path === 'string') {
+            targetPath = fileResponse.path
+          }
+        }
+        if (!targetPath) return
+        await ensureVisiblePath(targetPath, true)
+        const node = getNodeByPath(targetPath)
+        setSelected({ path: targetPath, fileId: node?.file_id ?? initialFile.fileId ?? null })
+        setFocusedPath(targetPath)
+        setActiveTab('preview')
+      } catch (error) {
+        console.error('project modal initial file selection failed', error)
+      }
+    }
+    run()
+  }, [ensureVisiblePath, getNodeByPath, initialFile, open, projectId, setActiveTab, setFocusedPath, setSelected])
 
   React.useEffect(() => {
     if (open && projectId) span('project_modal_opened', { project_id: projectId })

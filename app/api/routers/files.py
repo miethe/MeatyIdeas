@@ -348,14 +348,21 @@ def list_recent_files(
 
     items: list[RecentFileEntry] = []
     for file_obj, project in rows[:limit]:
-        updated_at = (file_obj.updated_at or dt.datetime.now(tz=dt.timezone.utc)).isoformat()
+        updated_at = file_obj.updated_at or dt.datetime.now(tz=dt.timezone.utc)
+        front_matter, body = extract_front_matter(file_obj.content_md or "")
+        description_value = None
+        if isinstance(front_matter, dict):
+            raw_description = front_matter.get("description")
+            if isinstance(raw_description, str):
+                description_value = raw_description.strip() or None
+        summary_text = description_value or summarize_markdown(body)
         items.append(
             RecentFileEntry(
                 id=file_obj.id,
                 title=file_obj.title,
                 path=file_obj.path,
                 updated_at=updated_at,
-                summary=None,
+                summary=summary_text,
                 project=RecentFileProject(
                     id=project.id,
                     name=project.name,

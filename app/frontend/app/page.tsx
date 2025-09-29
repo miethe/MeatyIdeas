@@ -36,8 +36,18 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { Separator } from '@/components/ui/separator'
-import { Star, ExternalLink, Eye, Filter, MoreHorizontal, Trash2, Plus, ArrowUpDown } from 'lucide-react'
+import {
+  Star,
+  ExternalLink,
+  Eye,
+  Filter,
+  MoreHorizontal,
+  Trash2,
+  Plus,
+  ArrowUpDown,
+  ChevronsUpDown,
+  X,
+} from 'lucide-react'
 import Link from 'next/link'
 import { toast } from 'sonner'
 import { span } from '@/lib/telemetry'
@@ -122,7 +132,7 @@ async function fetchProjects(params: {
   tags: string[]
   languages: string[]
   owner: string
-  status: string | null
+  statuses: string[]
   groups: string[]
   updatedPreset: string
   sort: string
@@ -141,8 +151,9 @@ async function fetchProjects(params: {
   if (params.owner && params.owner !== 'all') {
     search.set('owner', params.owner)
   }
-  if (params.status && params.status !== 'all') {
-    search.set('status', params.status)
+  if (params.statuses.length) {
+    const statusValue = encodeList(params.statuses)
+    if (statusValue) search.set('status', statusValue)
   }
   if (params.groups.length) {
     params.groups.forEach((groupId) => search.append('group', groupId))
@@ -188,36 +199,39 @@ export default function DashboardPage() {
   const [groupsProject, setGroupsProject] = React.useState<ProjectCard | null>(null)
   const [deleteProject, setDeleteProject] = React.useState<ProjectCard | null>(null)
 
+  const searchParamString = searchParams.toString()
   const viewParam = searchParams.get('view') ?? 'all'
-  const tags = decodeList(searchParams.get('tags'))
-  const languages = decodeList(searchParams.get('languages'))
+  const tags = React.useMemo(() => decodeList(searchParams.get('tags')), [searchParamString])
+  const languages = React.useMemo(() => decodeList(searchParams.get('languages')), [searchParamString])
   const owner = searchParams.get('owner') ?? 'all'
   const updatedPreset = searchParams.get('updated') ?? 'any'
   const sortParam = searchParams.get('sort') ?? '-updated'
-  const statusParam = searchParams.get('status')
+  const statusFilters = React.useMemo(() => decodeList(searchParams.get('status')), [searchParamString])
   const densityParam = (searchParams.get('density') as Density | null) ?? null
 
   const { data: config } = useQuery({ queryKey: ['config'], queryFn: getConfig, staleTime: 60_000 })
   const creationRefreshEnabled = (config?.UX_CREATION_DASHBOARD_REFRESH || 0) === 1
   const groupsEnabled = (config?.GROUPS_UI || 0) === 1
   const projectModalEnabled = (config?.PROJECT_MODAL || 0) === 1
-  const searchParamString = searchParams.toString()
   const groupFilters = React.useMemo(() => Array.from(new Set(searchParams.getAll('group'))), [searchParamString])
   const effectiveView = viewParam === 'tag' && tags.length === 0 ? 'all' : viewParam
   const modalParam = searchParams.get('modal')
   const modalIdParam = searchParams.get('id')
   const [modalProjectId, setModalProjectId] = React.useState<string | null>(null)
   const [modalOpen, setModalOpen] = React.useState(false)
+  const [modalFocusFile, setModalFocusFile] = React.useState<{ fileId: string | null; path: string | null } | null>(null)
   const lastFocusRef = React.useRef<HTMLElement | null>(null)
   const openedFromDashboardRef = React.useRef(false)
 
   React.useEffect(() => {
     if (projectModalEnabled && modalParam === 'project' && modalIdParam) {
       setModalProjectId((prev) => (prev === modalIdParam ? prev : modalIdParam))
+      setModalFocusFile(null)
       setModalOpen(true)
     } else {
       setModalOpen(false)
       setModalProjectId(null)
+      setModalFocusFile(null)
     }
   }, [projectModalEnabled, modalParam, modalIdParam])
   const viewOptions = React.useMemo(() => {
@@ -260,12 +274,13 @@ export default function DashboardPage() {
     }
   }, [densityParam])
 
-  function updateParams(updates: Record<string, string | null>) {
+  function updateParams(updates: Record<string, string | null | undefined>) {
     if (!('cursor' in updates)) {
       updates.cursor = null
     }
     const next = new URLSearchParams(searchParams.toString())
     Object.entries(updates).forEach(([key, value]) => {
+      if (value === undefined) return
       if (value === null || value === '') next.delete(key)
       else next.set(key, value)
     })
@@ -283,7 +298,7 @@ export default function DashboardPage() {
         tags,
         languages,
         owner,
-        status: statusParam,
+        statuses: statusFilters,
         groups: groupFilters,
         updated: updatedPreset,
         sort: sortParam,
@@ -295,7 +310,7 @@ export default function DashboardPage() {
         tags,
         languages,
         owner,
-        status: statusParam,
+        statuses: statusFilters,
         groups: groupFilters,
         updatedPreset,
         sort: sortParam,
@@ -382,9 +397,6 @@ export default function DashboardPage() {
       .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
       .slice(0, 6)
   }, [creationRefreshEnabled, groupFilterQuery.data])
-
-  const quickFiltersActive = Boolean((statusParam && statusParam !== 'all') || groupFilters.length > 0)
-  const showQuickFilterRibbon = creationRefreshEnabled && (statusOptions.length > 0 || groupOptions.length > 0 || quickFiltersActive)
 
   const groupsQuery = useQuery({
     queryKey: ['project-groups'],
@@ -476,37 +488,93 @@ export default function DashboardPage() {
     updateParams({ view: next === 'all' ? null : next })
   }
 
-  const handleSelectTag = (tag: string) => {
-    const next = tags.includes(tag) ? tags : [...tags, tag]
-    updateParams({ tags: encodeList(next), view: 'tag' })
-  }
+  const setTagFilters = React.useCallback(
+    (next: string[], focusView: boolean) => {
+      updateParams({
+        tags: encodeList(next),
+        view: focusView ? (next.length ? 'tag' : null) : undefined,
+      })
+    },
+    [updateParams]
+  )
 
-  const handleRemoveTag = (tag: string) => {
-    const next = tags.filter((t) => t !== tag)
-    updateParams({ tags: encodeList(next), view: next.length ? 'tag' : null })
-  }
+  const handleToggleTagFilter = React.useCallback(
+    (tag: string, focusView = false) => {
+      const normalized = slugifyTag(tag)
+      if (!normalized) return
+      const next = new Set(tags)
+      const wasActive = next.has(normalized)
+      if (wasActive) next.delete(normalized)
+      else next.add(normalized)
+      const nextList = Array.from(next)
+      setTagFilters(nextList, focusView)
+      span('dashboard_filter_chip', { type: 'tag', value: normalized, active: !wasActive })
+    },
+    [setTagFilters, tags]
+  )
 
-  const handleAddTag = () => {
+  const handlePromptAddTag = React.useCallback(() => {
     const input = window.prompt('Filter by tag:')
     if (!input) return
-    const slug = slugifyTag(input)
-    if (!slug) return
-    if (tags.includes(slug)) return
-    updateParams({ tags: encodeList([...tags, slug]), view: 'tag' })
-  }
+    handleToggleTagFilter(input, true)
+  }, [handleToggleTagFilter])
 
-  const handleToggleLanguage = (lang: string) => {
-    const next = languages.includes(lang) ? languages.filter((l) => l !== lang) : [...languages, lang]
-    updateParams({ languages: encodeList(next) })
-  }
+  const handleToggleTagFromSidebar = React.useCallback(
+    (tag: string) => {
+      handleToggleTagFilter(tag, true)
+    },
+    [handleToggleTagFilter]
+  )
 
-  const handleUpdatedChange = (preset: string) => {
-    updateParams({ updated: preset === 'any' ? null : preset })
-  }
+  const handleClearTags = React.useCallback(() => {
+    if (tags.length === 0) return
+    setTagFilters([], true)
+    span('dashboard_filter_chip', { type: 'tag', value: 'all', active: false })
+  }, [setTagFilters, tags.length])
 
-  const handleOwnerChange = (value: string) => {
-    updateParams({ owner: value === 'all' ? null : value })
-  }
+  const handleToggleLanguage = React.useCallback(
+    (lang: string) => {
+      const next = new Set(languages)
+      const wasActive = next.has(lang)
+      if (wasActive) next.delete(lang)
+      else next.add(lang)
+      updateParams({ languages: encodeList(Array.from(next)) })
+      span('dashboard_filter_chip', { type: 'language', value: lang, active: !wasActive })
+    },
+    [languages, updateParams]
+  )
+
+  const handleClearLanguages = React.useCallback(() => {
+    if (languages.length === 0) return
+    updateParams({ languages: null })
+    span('dashboard_filter_chip', { type: 'language', value: 'all', active: false })
+  }, [languages.length, updateParams])
+
+  const handleUpdatedChange = React.useCallback(
+    (preset: string) => {
+      updateParams({ updated: preset === 'any' ? null : preset })
+      span('dashboard_filter_chip', { type: 'updated', value: preset, active: preset !== 'any' })
+    },
+    [updateParams]
+  )
+
+  const handleClearUpdated = React.useCallback(() => {
+    updateParams({ updated: null })
+    span('dashboard_filter_chip', { type: 'updated', value: 'any', active: false })
+  }, [updateParams])
+
+  const handleOwnerChange = React.useCallback(
+    (value: string) => {
+      updateParams({ owner: value === 'all' ? null : value })
+      span('dashboard_filter_chip', { type: 'owner', value, active: value !== 'all' })
+    },
+    [updateParams]
+  )
+
+  const handleClearOwner = React.useCallback(() => {
+    updateParams({ owner: null })
+    span('dashboard_filter_chip', { type: 'owner', value: 'all', active: false })
+  }, [updateParams])
 
   const handleDensityChange = (value: Density) => {
     setDensity(value)
@@ -533,30 +601,43 @@ export default function DashboardPage() {
     span('dashboard_sort_change', { sort_key: value })
   }
 
-  const handleStatusFilterChange = (value: string | null) => {
-    const nextValue = value && value !== 'all' ? value : null
-    updateParams({ status: nextValue })
-    span('dashboard_filter_chip', { type: 'status', value: nextValue ?? 'all', active: Boolean(nextValue) })
-  }
+  const handleToggleStatus = React.useCallback(
+    (value: string) => {
+      const normalized = value.trim().toLowerCase()
+      if (!normalized) return
+      const next = new Set(statusFilters)
+      const wasActive = next.has(normalized)
+      if (wasActive) next.delete(normalized)
+      else next.add(normalized)
+      updateParams({ status: encodeList(Array.from(next)) })
+      span('dashboard_filter_chip', { type: 'status', value: normalized, active: !wasActive })
+    },
+    [statusFilters, updateParams]
+  )
 
-  const handleGroupFilterToggle = (groupId: string) => {
-    const next = new Set(groupFilters)
-    const isActive = next.has(groupId)
-    if (isActive) next.delete(groupId)
-    else next.add(groupId)
-    span('dashboard_filter_chip', { type: 'group', value: groupId, active: !isActive })
-    setGroupFilters(Array.from(next))
-  }
+  const handleClearStatuses = React.useCallback(() => {
+    if (statusFilters.length === 0) return
+    updateParams({ status: null })
+    span('dashboard_filter_chip', { type: 'status', value: 'all', active: false })
+  }, [statusFilters.length, updateParams])
 
-  const handleClearQuickFilters = () => {
-    const next = new URLSearchParams(searchParamString)
-    next.delete('group')
-    next.delete('status')
-    next.delete('cursor')
-    const qs = next.toString()
-    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
-    span('dashboard_filter_chip', { type: 'clear', value: 'all', active: false })
-  }
+  const handleGroupFilterToggle = React.useCallback(
+    (groupId: string) => {
+      const next = new Set(groupFilters)
+      const isActive = next.has(groupId)
+      if (isActive) next.delete(groupId)
+      else next.add(groupId)
+      span('dashboard_filter_chip', { type: 'group', value: groupId, active: !isActive })
+      setGroupFilters(Array.from(next))
+    },
+    [groupFilters, setGroupFilters]
+  )
+
+  const handleClearGroups = React.useCallback(() => {
+    if (groupFilters.length === 0) return
+    setGroupFilters([])
+    span('dashboard_filter_chip', { type: 'group', value: 'all', active: false })
+  }, [groupFilters.length, setGroupFilters])
 
   const handleResetFilters = () => {
     const next = new URLSearchParams(searchParamString)
@@ -582,6 +663,7 @@ export default function DashboardPage() {
   const closeModal = React.useCallback(() => {
     setModalOpen(false)
     setModalProjectId(null)
+    setModalFocusFile(null)
     if (openedFromDashboardRef.current) {
       openedFromDashboardRef.current = false
       router.back()
@@ -626,6 +708,7 @@ export default function DashboardPage() {
     openedFromDashboardRef.current = true
     lastFocusRef.current = document.activeElement as HTMLElement | null
     setModalProjectId(project.id)
+    setModalFocusFile(null)
     setModalOpen(true)
     const params = new URLSearchParams(searchParamString)
     params.set('modal', 'project')
@@ -637,6 +720,52 @@ export default function DashboardPage() {
   const handleQuickOpen = (project: ProjectCard) => {
     window.open(`/projects/${project.slug}`, '_blank')
   }
+
+  const handleSidebarProjectOpen = React.useCallback(
+    (project: { id: string; slug: string; name: string }) => {
+      span('sidebar_project_open', { project_id: project.id })
+      if (!projectModalEnabled) {
+        router.push(`/projects/${project.slug}`)
+        return
+      }
+      openedFromDashboardRef.current = true
+      setModalProjectId(project.id)
+      setModalFocusFile(null)
+      setModalOpen(true)
+      const params = new URLSearchParams(searchParamString)
+      params.set('modal', 'project')
+      params.set('id', project.id)
+      const next = params.toString()
+      router.push(next ? `${pathname}?${next}` : `${pathname}?modal=project&id=${project.id}`, { scroll: false })
+    },
+    [pathname, projectModalEnabled, router, searchParamString]
+  )
+
+  const handleSidebarFileOpen = React.useCallback(
+    (entry: { projectId: string; projectSlug: string; fileId: string | null; path: string; name: string }) => {
+      span('sidebar_file_open', {
+        project_id: entry.projectId,
+        file_id: entry.fileId ?? entry.path,
+        path: entry.path,
+      })
+      if (!projectModalEnabled) {
+        const slug = entry.projectSlug || entry.projectId
+        const target = entry.fileId ? `/projects/${slug}?file=${entry.fileId}` : `/projects/${slug}`
+        router.push(target)
+        return
+      }
+      openedFromDashboardRef.current = true
+      setModalProjectId(entry.projectId)
+      setModalFocusFile({ fileId: entry.fileId, path: entry.path || null })
+      setModalOpen(true)
+      const params = new URLSearchParams(searchParamString)
+      params.set('modal', 'project')
+      params.set('id', entry.projectId)
+      const next = params.toString()
+      router.push(next ? `${pathname}?${next}` : `${pathname}?modal=project&id=${entry.projectId}`, { scroll: false })
+    },
+    [pathname, projectModalEnabled, router, searchParamString]
+  )
 
   const handleRecentPeek = (file: RecentFileEntry) => {
     const slug = file.project.slug || file.project.id
@@ -653,17 +782,22 @@ export default function DashboardPage() {
   const sidebar = (
     <DashboardSidebar
       activeView={effectiveView}
-      tags={tags}
+      selectedTags={tags}
       availableTags={tagsQuery.data || []}
       onChangeView={handleViewChange}
-      onSelectTag={handleSelectTag}
+      onToggleTag={handleToggleTagFromSidebar}
+      onClearTags={handleClearTags}
       viewOptions={viewOptions}
     />
   )
 
   if (isGroupsView) {
     return (
-      <AppShell sidebar={sidebar}>
+      <AppShell
+        sidebar={sidebar}
+        onSidebarProjectOpen={handleSidebarProjectOpen}
+        onSidebarFileOpen={handleSidebarFileOpen}
+      >
         <GroupsBoard
           isLoading={groupsQuery.isLoading || projectsForGroupsQuery.isLoading}
           groups={groupsQuery.data || []}
@@ -682,42 +816,43 @@ export default function DashboardPage() {
 
   return (
     <>
-      <AppShell sidebar={sidebar}>
+    <AppShell
+      sidebar={sidebar}
+      onSidebarProjectOpen={handleSidebarProjectOpen}
+      onSidebarFileOpen={handleSidebarFileOpen}
+    >
         <div className={creationRefreshEnabled ? 'grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]' : 'flex flex-col gap-6'}>
           <div className="flex flex-col gap-6">
             <FilterBar
-              tags={tags}
+              statusOptions={statusOptions}
+              selectedStatuses={statusFilters}
+              onToggleStatus={handleToggleStatus}
+              onClearStatuses={handleClearStatuses}
+              tagOptions={tagsQuery.data || []}
+              selectedTags={tags}
               tagLabelLookup={tagLabelLookup}
+              onToggleTag={handleToggleTagFilter}
+              onCreateTag={handlePromptAddTag}
+              onClearTags={handleClearTags}
               languages={languages}
               languageOptions={languageOptions}
-              onRemoveTag={handleRemoveTag}
-              onAddTag={handleAddTag}
               onToggleLanguage={handleToggleLanguage}
+              onClearLanguages={handleClearLanguages}
               updatedPreset={updatedPreset}
               onUpdatedChange={handleUpdatedChange}
+              onClearUpdated={handleClearUpdated}
               owner={owner}
               onOwnerChange={handleOwnerChange}
-              onReset={handleResetFilters}
+              onClearOwner={handleClearOwner}
+              groupOptions={groupOptions}
+              selectedGroups={groupFilters}
+              onToggleGroup={handleGroupFilterToggle}
+              onClearGroups={handleClearGroups}
+              onClearAll={handleResetFilters}
+              sortValue={sortParam}
+              onSortChange={handleSortChange}
             />
-            {showQuickFilterRibbon && (
-              <QuickFilterRibbon
-                statusOptions={statusOptions}
-                activeStatus={statusParam}
-                onStatusChange={handleStatusFilterChange}
-                groupOptions={groupOptions}
-                activeGroups={groupFilters}
-                onToggleGroup={handleGroupFilterToggle}
-                onClear={handleClearQuickFilters}
-              />
-            )}
-            {creationRefreshEnabled ? (
-              <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-                <SortDropdown value={sortParam} onChange={handleSortChange} />
-                <DensityControls density={density} onDensityChange={handleDensityChange} />
-              </div>
-            ) : (
-              <DensityControls density={density} onDensityChange={handleDensityChange} />
-            )}
+            <DensityControls density={density} onDensityChange={handleDensityChange} />
             {projectsQuery.isLoading ? (
               <ProjectGridSkeleton />
             ) : allProjects.length === 0 ? (
@@ -759,6 +894,7 @@ export default function DashboardPage() {
           onOpenChange={handleModalOpenChange}
           onAfterClose={handleModalAfterClose}
           onExpand={handleExpandFromModal}
+          initialFile={modalFocusFile}
         />
       )}
       <ProjectEditDialog
@@ -822,17 +958,19 @@ export default function DashboardPage() {
 
 function DashboardSidebar({
   activeView,
-  tags,
+  selectedTags,
   availableTags,
   onChangeView,
-  onSelectTag,
+  onToggleTag,
+  onClearTags,
   viewOptions,
 }: {
   activeView: string
-  tags: string[]
-  availableTags: Array<{ slug: string; label: string; count: number }>
+  selectedTags: string[]
+  availableTags: Array<{ slug: string; label: string; count: number; color?: string | null }>
   onChangeView: (view: string) => void
-  onSelectTag: (tag: string) => void
+  onToggleTag: (tag: string) => void
+  onClearTags: () => void
   viewOptions: Array<{ id: string; label: string }>
 }) {
   const isTagView = activeView === 'tag'
@@ -870,26 +1008,47 @@ function DashboardSidebar({
         </nav>
       </div>
       <div>
-        <div className="mb-2 text-xs uppercase text-muted-foreground">Top Tags</div>
-        <div className="space-y-1 text-sm">
-          {(availableTags || []).slice(0, 10).map((tag) => {
-            const active = tags.includes(tag.slug)
-            return (
-              <button
-                key={tag.slug}
-                className={cn(
-                  'flex w-full items-center justify-between rounded px-2 py-1 text-left transition hover:bg-accent',
-                  active && 'bg-accent text-primary'
-                )}
-                onClick={() => onSelectTag(tag.slug)}
-              >
-                <span className="truncate">#{tag.label}</span>
-                <span className="text-xs text-muted-foreground">{tag.count}</span>
-              </button>
-            )
-          })}
-          {availableTags.length === 0 && <div className="text-xs text-muted-foreground">No tags yet</div>}
+        <div className="mb-2 flex items-center justify-between">
+          <span className="text-xs uppercase text-muted-foreground">Tags</span>
+          {selectedTags.length > 0 && (
+            <button
+              type="button"
+              onClick={onClearTags}
+              className="text-[11px] font-medium text-muted-foreground transition hover:text-primary"
+            >
+              Clear
+            </button>
+          )}
         </div>
+        {availableTags.length === 0 ? (
+          <div className="text-xs text-muted-foreground">No tags yet.</div>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {availableTags.slice(0, 20).map((tag) => {
+              const active = selectedTags.includes(tag.slug)
+              return (
+                <button
+                  key={tag.slug}
+                  type="button"
+                  onClick={() => onToggleTag(tag.slug)}
+                  className={cn(
+                    'inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
+                    active
+                      ? 'border-primary bg-primary/10 text-primary shadow-sm'
+                      : 'border-border/60 text-muted-foreground hover:border-primary/40 hover:text-primary'
+                  )}
+                >
+                  <span
+                    className="h-2.5 w-2.5 rounded-full"
+                    style={{ backgroundColor: tag.color || 'var(--primary)' }}
+                  />
+                  <span className="truncate">{tag.label}</span>
+                  {tag.count > 0 && <span className="text-[11px] text-muted-foreground">{tag.count}</span>}
+                </button>
+              )
+            })}
+          </div>
+        )}
       </div>
     </div>
   )
@@ -900,70 +1059,164 @@ function ChevronMarker() {
 }
 
 function FilterBar({
-  tags,
+  statusOptions,
+  selectedStatuses,
+  onToggleStatus,
+  onClearStatuses,
+  tagOptions,
+  selectedTags,
   tagLabelLookup,
+  onToggleTag,
+  onCreateTag,
+  onClearTags,
   languages,
   languageOptions,
-  onRemoveTag,
-  onAddTag,
   onToggleLanguage,
+  onClearLanguages,
   updatedPreset,
   onUpdatedChange,
+  onClearUpdated,
   owner,
   onOwnerChange,
-  onReset,
+  onClearOwner,
+  groupOptions,
+  selectedGroups,
+  onToggleGroup,
+  onClearGroups,
+  onClearAll,
+  sortValue,
+  onSortChange,
 }: {
-  tags: string[]
+  statusOptions: Array<{ key: string; label: string; color?: string | null }>
+  selectedStatuses: string[]
+  onToggleStatus: (status: string) => void
+  onClearStatuses: () => void
+  tagOptions: Array<{ slug: string; label: string; count: number; color?: string | null }>
+  selectedTags: string[]
   tagLabelLookup: Record<string, string>
+  onToggleTag: (slug: string) => void
+  onCreateTag: () => void
+  onClearTags: () => void
   languages: string[]
   languageOptions: string[]
-  onRemoveTag: (tag: string) => void
-  onAddTag: () => void
   onToggleLanguage: (language: string) => void
+  onClearLanguages: () => void
   updatedPreset: string
   onUpdatedChange: (preset: string) => void
+  onClearUpdated: () => void
   owner: string
   onOwnerChange: (value: string) => void
-  onReset: () => void
+  onClearOwner: () => void
+  groupOptions: ProjectGroup[]
+  selectedGroups: string[]
+  onToggleGroup: (groupId: string) => void
+  onClearGroups: () => void
+  onClearAll: () => void
+  sortValue: string
+  onSortChange: (value: string) => void
 }) {
+  const activeStatusCount = selectedStatuses.length
+  const activeTagCount = selectedTags.length
+  const activeLanguageCount = languages.length
+  const activeGroupCount = selectedGroups.length
+  const hasOwnerFilter = owner !== 'all'
+  const hasUpdatedFilter = updatedPreset !== 'any'
+  const hasActiveFilters =
+    activeStatusCount > 0 ||
+    activeTagCount > 0 ||
+    activeLanguageCount > 0 ||
+    hasOwnerFilter ||
+    hasUpdatedFilter ||
+    activeGroupCount > 0
+
   return (
-    <div className="flex flex-wrap items-center gap-3 rounded-md border bg-muted/40 p-3">
-      <div className="flex items-center gap-2">
-        <Filter className="h-4 w-4 text-muted-foreground" />
-        <span className="text-sm font-medium">Filters</span>
+    <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border/70 bg-background/80 p-3 shadow-sm">
+      <div className="flex items-center gap-2 rounded-full bg-muted/50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        <Filter className="h-3.5 w-3.5" />
+        Filters
       </div>
-      <Separator orientation="vertical" className="h-6" />
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs uppercase text-muted-foreground">Tags</span>
-        {tags.map((tag) => {
-          const label = tagLabelLookup[tag] || tag
-          return (
-            <Badge key={tag} variant="secondary" className="flex items-center gap-1">
-              #{label}
-              <button className="text-xs" onClick={() => onRemoveTag(tag)} aria-label={`Remove ${label}`}>
-              ×
-            </button>
-            </Badge>
-          )
-        })}
-        <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={onAddTag}>
-          Add tag
-        </Button>
-      </div>
-      <Separator orientation="vertical" className="h-6" />
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button size="sm" variant="outline" className="h-7 px-2 text-xs">
-            Languages {languages.length ? `(${languages.length})` : ''}
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent className="w-48">
-          <DropdownMenuLabel>Languages</DropdownMenuLabel>
+      {statusOptions.length > 0 && (
+        <FilterChip label="Status" count={activeStatusCount} active={activeStatusCount > 0} onClear={onClearStatuses}>
+          <DropdownMenuLabel className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            Status
+          </DropdownMenuLabel>
           <DropdownMenuSeparator />
-          {languageOptions.length === 0 ? (
-            <div className="px-2 py-1 text-sm text-muted-foreground">No data</div>
+          <div className="max-h-56 space-y-1 overflow-y-auto pr-1">
+            {statusOptions.map((option) => (
+              <DropdownMenuCheckboxItem
+                key={option.key}
+                checked={selectedStatuses.includes(option.key)}
+                onCheckedChange={() => onToggleStatus(option.key)}
+                className="capitalize"
+              >
+                <div className="flex w-full items-center gap-2">
+                  <span
+                    className="h-2.5 w-2.5 rounded-full"
+                    style={{ backgroundColor: option.color || 'var(--primary)' }}
+                  />
+                  <span className="flex-1 truncate">{option.label}</span>
+                </div>
+              </DropdownMenuCheckboxItem>
+            ))}
+          </div>
+        </FilterChip>
+      )}
+      <FilterChip label="Tags" count={activeTagCount} active={activeTagCount > 0} onClear={onClearTags}>
+        <DropdownMenuLabel className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          Tags
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <div className="max-h-56 space-y-1 overflow-y-auto pr-1">
+          {tagOptions.length === 0 ? (
+            <div className="px-2 py-2 text-sm text-muted-foreground">No tags yet</div>
           ) : (
-            languageOptions.map((lang) => (
+            tagOptions.map((tag) => (
+              <DropdownMenuCheckboxItem
+                key={tag.slug}
+                checked={selectedTags.includes(tag.slug)}
+                onCheckedChange={() => onToggleTag(tag.slug)}
+              >
+                <div className="flex w-full items-center gap-2">
+                  <span
+                    className="h-2.5 w-2.5 rounded-full"
+                    style={{ backgroundColor: tag.color || 'var(--primary)' }}
+                  />
+                  <span className="flex-1 truncate">{tag.label}</span>
+                  {tag.count > 0 && (
+                    <span className="text-xs text-muted-foreground">{tag.count}</span>
+                  )}
+                </div>
+              </DropdownMenuCheckboxItem>
+            ))
+          )}
+        </div>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          onSelect={(event) => {
+            event.preventDefault()
+            onCreateTag()
+          }}
+          className="gap-2"
+        >
+          <Plus className="h-4 w-4" />
+          Create or add tag
+        </DropdownMenuItem>
+      </FilterChip>
+      <FilterChip
+        label="Languages"
+        count={activeLanguageCount}
+        active={activeLanguageCount > 0}
+        onClear={onClearLanguages}
+      >
+        <DropdownMenuLabel className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          Languages
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        {languageOptions.length === 0 ? (
+          <div className="px-2 py-2 text-sm text-muted-foreground">No language metadata yet</div>
+        ) : (
+          <div className="max-h-48 space-y-1 overflow-y-auto pr-1">
+            {languageOptions.map((lang) => (
               <DropdownMenuCheckboxItem
                 key={lang}
                 checked={languages.includes(lang)}
@@ -971,47 +1224,142 @@ function FilterBar({
               >
                 {lang}
               </DropdownMenuCheckboxItem>
-            ))
-          )}
-        </DropdownMenuContent>
-      </DropdownMenu>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button size="sm" variant="outline" className="h-7 px-2 text-xs">
-            Updated
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent className="w-44">
-          <DropdownMenuLabel>Last updated</DropdownMenuLabel>
-          <DropdownMenuSeparator />
-          <DropdownMenuRadioGroup value={updatedPreset} onValueChange={onUpdatedChange}>
-            {UPDATED_PRESETS.map((preset) => (
-              <DropdownMenuRadioItem key={preset.id} value={preset.id}>
-                {preset.label}
-              </DropdownMenuRadioItem>
             ))}
-          </DropdownMenuRadioGroup>
-        </DropdownMenuContent>
-      </DropdownMenu>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button size="sm" variant="outline" className="h-7 px-2 text-xs">
-            Owner
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent className="w-40">
-          <DropdownMenuLabel>Owner</DropdownMenuLabel>
+          </div>
+        )}
+      </FilterChip>
+      <FilterChip label="Updated" count={hasUpdatedFilter ? 1 : 0} active={hasUpdatedFilter} onClear={onClearUpdated}>
+        <DropdownMenuLabel className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          Last Updated
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <DropdownMenuRadioGroup value={updatedPreset} onValueChange={onUpdatedChange}>
+          {UPDATED_PRESETS.map((preset) => (
+            <DropdownMenuRadioItem key={preset.id} value={preset.id}>
+              {preset.label}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </FilterChip>
+      <FilterChip label="Owner" count={hasOwnerFilter ? 1 : 0} active={hasOwnerFilter} onClear={onClearOwner}>
+        <DropdownMenuLabel className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          Owner
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <DropdownMenuRadioGroup value={owner} onValueChange={onOwnerChange}>
+          <DropdownMenuRadioItem value="all">All</DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="me">Me</DropdownMenuRadioItem>
+        </DropdownMenuRadioGroup>
+      </FilterChip>
+      {groupOptions.length > 0 && (
+        <FilterChip label="Groups" count={activeGroupCount} active={activeGroupCount > 0} onClear={onClearGroups}>
+          <DropdownMenuLabel className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            Groups
+          </DropdownMenuLabel>
           <DropdownMenuSeparator />
-          <DropdownMenuRadioGroup value={owner} onValueChange={onOwnerChange}>
-            <DropdownMenuRadioItem value="me">Me</DropdownMenuRadioItem>
-            <DropdownMenuRadioItem value="all">All</DropdownMenuRadioItem>
-          </DropdownMenuRadioGroup>
-        </DropdownMenuContent>
-      </DropdownMenu>
-      <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={onReset}>
-        Reset
-      </Button>
+          <div className="max-h-48 space-y-1 overflow-y-auto pr-1">
+            {groupOptions.map((group) => (
+              <DropdownMenuCheckboxItem
+                key={group.id}
+                checked={selectedGroups.includes(group.id)}
+                onCheckedChange={() => onToggleGroup(group.id)}
+              >
+                <div className="flex w-full items-center gap-2">
+                  <span
+                    className="h-2.5 w-2.5 rounded-full"
+                    style={{ backgroundColor: group.color || 'var(--primary)' }}
+                  />
+                  <span className="flex-1 truncate">{group.name}</span>
+                </div>
+              </DropdownMenuCheckboxItem>
+            ))}
+          </div>
+        </FilterChip>
+      )}
+      <div className="ml-auto flex items-center gap-2">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="px-3 text-xs"
+          onClick={onClearAll}
+          disabled={!hasActiveFilters}
+        >
+          Clear All
+        </Button>
+        <SortDropdown value={sortValue} onChange={onSortChange} />
+      </div>
+      {activeTagCount > 0 && (
+        <div className="mt-2 flex w-full flex-wrap items-center gap-2 pl-8">
+          {selectedTags.map((tag) => {
+            const label = tagLabelLookup[tag] ?? tag
+            return (
+              <Badge key={tag} variant="secondary" className="flex items-center gap-1">
+                #{label}
+                <button
+                  type="button"
+                  onClick={() => onToggleTag(tag)}
+                  className="text-xs text-muted-foreground hover:text-primary"
+                  aria-label={`Remove tag ${label}`}
+                >
+                  ×
+                </button>
+              </Badge>
+            )
+          })}
+        </div>
+      )}
     </div>
+  )
+}
+
+function FilterChip({
+  label,
+  count,
+  active,
+  onClear,
+  children,
+}: {
+  label: string
+  count: number
+  active: boolean
+  onClear: () => void
+  children: React.ReactNode
+}) {
+  const [open, setOpen] = React.useState(false)
+  return (
+    <DropdownMenu open={open} onOpenChange={setOpen}>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          className={cn(
+            'inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
+            active
+              ? 'border-primary/60 bg-primary/5 text-primary shadow-sm'
+              : 'border-border/60 bg-background hover:border-primary/40'
+          )}
+        >
+          <span>{count > 0 ? `${label} (${count})` : label}</span>
+          {active && (
+            <span
+              role="button"
+              aria-label={`Clear ${label}`}
+              onClick={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                onClear()
+              }}
+              className="rounded-full p-0.5 text-muted-foreground transition hover:text-primary"
+            >
+              <X className="h-3 w-3" />
+            </span>
+          )}
+          <ChevronsUpDown className="h-3.5 w-3.5 text-muted-foreground" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-64 space-y-2 p-2">
+        {children}
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 
@@ -1059,93 +1407,6 @@ function SortDropdown({ value, onChange }: { value: string; onChange: (value: st
         </DropdownMenuRadioGroup>
       </DropdownMenuContent>
     </DropdownMenu>
-  )
-}
-
-function QuickFilterRibbon({
-  statusOptions,
-  activeStatus,
-  onStatusChange,
-  groupOptions,
-  activeGroups,
-  onToggleGroup,
-  onClear,
-}: {
-  statusOptions: Array<{ key: string; label: string; color?: string | null }>
-  activeStatus: string | null
-  onStatusChange: (value: string | null) => void
-  groupOptions: ProjectGroup[]
-  activeGroups: string[]
-  onToggleGroup: (groupId: string) => void
-  onClear: () => void
-}) {
-  const hasFilters = Boolean((activeStatus && activeStatus !== 'all') || activeGroups.length > 0)
-  return (
-    <div className="rounded-md border bg-muted/20 px-3 py-3">
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="flex flex-1 flex-wrap items-center gap-3">
-          {statusOptions.length > 0 && (
-            <div className="flex items-center gap-2">
-              <span className="text-xs uppercase text-muted-foreground">Status</span>
-              <div className="flex flex-wrap gap-2">
-                {statusOptions.map((option) => {
-                  const isActive = activeStatus === option.key
-                  return (
-                    <button
-                      key={option.key}
-                      type="button"
-                      onClick={() => onStatusChange(isActive ? null : option.key)}
-                      className={cn(
-                        'rounded-full border px-3 py-1 text-xs font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/40',
-                        isActive
-                          ? 'border-primary bg-primary/10 text-primary'
-                          : 'border-muted-foreground/40 text-muted-foreground hover:border-primary/40 hover:text-primary'
-                      )}
-                    >
-                      {option.label}
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
-          )}
-          {groupOptions.length > 0 && (
-            <div className="flex items-center gap-2">
-              <span className="text-xs uppercase text-muted-foreground">Groups</span>
-              <div className="flex flex-wrap gap-2">
-                {groupOptions.map((group) => {
-                  const isActive = activeGroups.includes(group.id)
-                  return (
-                    <button
-                      key={group.id}
-                      type="button"
-                      onClick={() => onToggleGroup(group.id)}
-                      className={cn(
-                        'inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/40',
-                        isActive
-                          ? 'border-primary bg-primary/10 text-primary'
-                          : 'border-muted-foreground/40 text-muted-foreground hover:border-primary/40 hover:text-primary'
-                      )}
-                    >
-                      <span
-                        className="h-2.5 w-2.5 rounded-full"
-                        style={{ backgroundColor: group.color || 'var(--primary)' }}
-                      />
-                      <span className="truncate">{group.name}</span>
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
-          )}
-        </div>
-        {hasFilters && (
-          <Button variant="ghost" size="sm" onClick={onClear} className="text-xs">
-            Clear
-          </Button>
-        )}
-      </div>
-    </div>
   )
 }
 

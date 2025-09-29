@@ -246,6 +246,18 @@ class Tag(Base):
     )
 
 
+class FileType(Base):
+    __tablename__ = "file_types"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    slug: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    label: Mapped[str] = mapped_column(String, nullable=False)
+    color: Mapped[str | None] = mapped_column(String, nullable=True)
+    icon: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+
 class ProjectGroupMembership(Base):
     __tablename__ = "project_group_memberships"
     __table_args__ = (

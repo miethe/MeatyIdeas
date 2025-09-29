@@ -705,6 +705,13 @@ def _compute_activity_entries(
     return entries, sorted(sources), last_modified, signature
 
 
+def _apply_project_template(db: Session, project: Project, template_id: str | None) -> None:
+    if not template_id or template_id == 'blank':
+        return
+    db.rollback()
+    raise HTTPException(status_code=400, detail={"code": "UNKNOWN_TEMPLATE", "message": "Template not supported"})
+
+
 @router.post("", response_model=ProjectRead, status_code=201)
 def create_project(body: ProjectCreate, db: Session = Depends(get_db)):
     slug = slugify(body.name)
@@ -715,6 +722,7 @@ def create_project(body: ProjectCreate, db: Session = Depends(get_db)):
     p = Project(name=body.name, slug=slug, description=body.description or "", status=body.status)
     db.add(p)
     db.flush()
+    _apply_project_template(db, p, body.template_id)
     set_project_tags(db, p, body.tags)
     db.commit()
     db.refresh(p)
@@ -742,6 +750,7 @@ def list_projects(
     language: list[str] = Query(default_factory=list, alias="language[]"),
     owner: str | None = None,
     status: str | None = Query(default=None),
+    status_multi: list[str] = Query(default_factory=list, alias="status[]"),
     group: list[str] = Query(default_factory=list, alias="group[]"),
     updated_after: str | None = None,
     updated_before: str | None = None,
@@ -757,7 +766,13 @@ def list_projects(
 
     limit = max(1, min(limit, 50))
     normalized_view = (view or "all").lower()
-    normalized_status = (status or "").strip().lower()
+    status_filters = {value.strip().lower() for value in status_multi if value}
+    if status:
+        for part in (status.split(",") if status else []):
+            cleaned = part.strip().lower()
+            if cleaned:
+                status_filters.add(cleaned)
+    normalized_status = next(iter(status_filters)) if len(status_filters) == 1 else ""
 
     rows: list[Project] = db.scalars(select(Project)).all()
 
@@ -803,7 +818,10 @@ def list_projects(
             continue
         if before_dt and project.updated_at and project.updated_at > before_dt:
             continue
-        if normalized_status and (project.status or "").strip().lower() != normalized_status:
+        if status_filters:
+            project_status = (project.status or "").strip().lower()
+            if project_status not in status_filters:
+                continue
             continue
         filtered.append(project)
 
@@ -937,7 +955,7 @@ def list_projects(
             "tags": tags,
             "language": language,
             "owner": owner,
-            "status": status,
+            "status": list(status_filters),
             "group": group,
             "updated_after": updated_after,
             "updated_before": updated_before,

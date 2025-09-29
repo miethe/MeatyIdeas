@@ -64,7 +64,15 @@ export function ModalHeader({
     <div className="flex items-start justify-between gap-4 px-6 py-4">
       <div className="flex flex-col gap-1">
         <div className="flex items-center gap-3">
-          <h2 className="text-xl font-semibold">{summary.name}</h2>
+          <h2 className="text-xl font-semibold">
+            <button
+              type="button"
+              onClick={onExpand}
+              className="truncate text-left transition hover:text-primary hover:underline"
+            >
+              {summary.name}
+            </button>
+          </h2>
           <Badge variant="outline" className="text-xs uppercase">
             {summary.status}
           </Badge>

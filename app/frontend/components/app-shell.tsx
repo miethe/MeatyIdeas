@@ -4,7 +4,7 @@ import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { CommandPalette } from '@/components/search-command'
 import { ThemeToggle } from '@/components/theme-toggle'
-import { Search, Plus } from 'lucide-react'
+import { Search, Plus, ChevronRight } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { ProjectCreateSheet } from '@/components/projects/project-create-sheet'
@@ -22,9 +22,17 @@ interface AppShellProps {
   children: React.ReactNode
   sidebar?: React.ReactNode
   currentProjectId?: string | null
+  onSidebarProjectOpen?: (project: { id: string; slug: string; name: string }) => void
+  onSidebarFileOpen?: (entry: { projectId: string; projectSlug: string; fileId: string | null; path: string; name: string }) => void
 }
 
-export function AppShell({ children, sidebar, currentProjectId = null }: AppShellProps) {
+export function AppShell({
+  children,
+  sidebar,
+  currentProjectId = null,
+  onSidebarProjectOpen,
+  onSidebarFileOpen,
+}: AppShellProps) {
   const router = useRouter()
   const [resultsOpen, setResultsOpen] = React.useState(false)
   const [resultsInitial, setResultsInitial] = React.useState<any | undefined>(undefined)
@@ -133,6 +141,8 @@ export function AppShell({ children, sidebar, currentProjectId = null }: AppShel
       resultsEnabled={resultsEnabled}
       onOpenResults={handleOpenResults}
       onOpenTag={handleOpenTag}
+      onOpenProject={onSidebarProjectOpen}
+      onOpenFile={onSidebarFileOpen}
     />
   )
 
@@ -230,7 +240,21 @@ export function AppShell({ children, sidebar, currentProjectId = null }: AppShel
   )
 }
 
-function SidebarSections({ projects, resultsEnabled, onOpenResults, onOpenTag }: { projects: any[]; resultsEnabled: boolean; onOpenResults: () => void; onOpenTag: (tag: string) => void }) {
+function SidebarSections({
+  projects,
+  resultsEnabled,
+  onOpenResults,
+  onOpenTag,
+  onOpenProject,
+  onOpenFile,
+}: {
+  projects: any[]
+  resultsEnabled: boolean
+  onOpenResults: () => void
+  onOpenTag: (tag: string) => void
+  onOpenProject?: (project: { id: string; slug: string; name: string }) => void
+  onOpenFile?: (entry: { projectId: string; projectSlug: string; fileId: string | null; path: string; name: string }) => void
+}) {
   const [openProjects, setOpenProjects] = React.useState<Record<string, boolean>>(() => {
     try { return JSON.parse(localStorage.getItem('sidebar.projects') || '{}') } catch { return {} }
   })
@@ -248,15 +272,47 @@ function SidebarSections({ projects, resultsEnabled, onOpenResults, onOpenTag }:
           </ProjectCreateSheet>
         </div>
         <div className="space-y-1 text-sm">
-          {(projects || []).map((p: any) => (
-            <div key={p.id} className="">
-              <button className="flex w-full items-center justify-between rounded px-2 py-1 hover:bg-accent" onClick={() => toggleProject(p.id)}>
-                <span className="truncate" title={p.name}>{p.name}</span>
-                <span className="text-xs text-muted-foreground">{openProjects[p.id] ? '−' : '+'}</span>
-              </button>
-              {openProjects[p.id] && <TopLevelContents projectId={p.id} />}
-            </div>
-          ))}
+          {(projects || []).map((project: any) => {
+            const open = Boolean(openProjects[project.id])
+            const handleToggle = () => toggleProject(project.id)
+            const handleOpenProject = () => {
+              if (onOpenProject) {
+                onOpenProject({ id: project.id, slug: project.slug ?? project.id, name: project.name })
+              } else {
+                window.location.href = `/projects/${project.slug ?? project.id}`
+              }
+            }
+            return (
+              <div key={project.id} className="rounded-md">
+                <div className="flex items-center gap-2 px-2 py-1.5">
+                  <button
+                    type="button"
+                    className="flex h-6 w-6 items-center justify-center rounded-md border border-transparent text-muted-foreground transition hover:border-border hover:bg-muted"
+                    onClick={handleToggle}
+                    aria-label={open ? 'Collapse project' : 'Expand project'}
+                  >
+                    <ChevronRight className={cn('h-3 w-3 transition-transform', open && 'rotate-90')} />
+                  </button>
+                  <button
+                    type="button"
+                    className="flex-1 truncate text-left text-sm font-medium text-foreground transition hover:text-primary"
+                    onClick={handleOpenProject}
+                  >
+                    {project.name}
+                  </button>
+                </div>
+                {open && (
+                  <TopLevelContents
+                    projectId={project.id}
+                    projectSlug={project.slug ?? project.id}
+                    projectName={project.name}
+                    onOpenFile={onOpenFile}
+                    onOpenProject={onOpenProject}
+                  />
+                )}
+              </div>
+            )
+          })}
         </div>
       </div>
       <TagsSection resultsEnabled={resultsEnabled} onOpenTag={onOpenTag} />
@@ -274,18 +330,72 @@ function SidebarSections({ projects, resultsEnabled, onOpenResults, onOpenTag }:
   )
 }
 
-function TopLevelContents({ projectId }: { projectId: string }) {
-  const { data } = useQuery({ queryKey: ['tree', projectId], queryFn: async () => apiGet<any[]>(`/projects/${projectId}/files/tree`) })
-  const top = Array.isArray(data) ? data : []
+function TopLevelContents({
+  projectId,
+  projectSlug,
+  projectName,
+  onOpenProject,
+  onOpenFile,
+}: {
+  projectId: string
+  projectSlug: string
+  projectName: string
+  onOpenProject?: (project: { id: string; slug: string; name: string }) => void
+  onOpenFile?: (entry: { projectId: string; projectSlug: string; fileId: string | null; path: string; name: string }) => void
+}) {
+  const { data } = useQuery({
+    queryKey: ['tree', projectId],
+    queryFn: async () => apiGet<any[]>(`/projects/${projectId}/files/tree`),
+    staleTime: 30_000,
+  })
+  const nodes = Array.isArray(data) ? data : []
+  const top = nodes.slice(0, 6)
+  const handleViewAll = () => {
+    if (onOpenProject) onOpenProject({ id: projectId, slug: projectSlug, name: projectName })
+  }
   return (
-    <div className="ml-2 border-l pl-2">
-      {top.map((n: any) => (
-        <div key={n.path} className="flex items-center gap-2 px-1 py-0.5 text-xs text-muted-foreground">
-          <span className="truncate">{n.type === 'dir' ? `${n.name}/` : n.name}</span>
-        </div>
-      ))}
-      {top.length > 0 && (
-        <a href={`/projects/${projectId}`} className="block px-1 py-0.5 text-xs text-primary hover:underline">More…</a>
+    <div className="ml-4 border-l border-border/50 pl-3">
+      {top.map((node: any) => {
+        const isFile = node.type === 'file'
+        return (
+          <div key={node.path} className="flex items-center gap-2 py-1 text-xs text-muted-foreground">
+            <span className="h-1.5 w-1.5 rounded-full bg-border" />
+            {isFile ? (
+              <button
+                type="button"
+                className="flex-1 truncate text-left transition hover:text-primary"
+                onClick={() => {
+                  if (onOpenFile) {
+                    onOpenFile({
+                      projectId,
+                      projectSlug,
+                      fileId: node.file_id ?? null,
+                      path: node.path,
+                      name: node.name,
+                    })
+                  } else {
+                    const slug = projectSlug || projectId
+                    const target = node.file_id ? `/projects/${slug}?file=${node.file_id}` : `/projects/${slug}`
+                    window.location.href = target
+                  }
+                }}
+              >
+                {node.name}
+              </button>
+            ) : (
+              <span className="flex-1 truncate font-medium text-muted-foreground">{node.name}/</span>
+            )}
+          </div>
+        )
+      })}
+      {nodes.length > top.length && (
+        <button
+          type="button"
+          className="mt-1 text-xs font-medium text-primary transition hover:underline"
+          onClick={handleViewAll}
+        >
+          View all…
+        </button>
       )}
     </div>
   )
@@ -314,23 +424,33 @@ function TagsSection({ resultsEnabled, onOpenTag }: { resultsEnabled: boolean; o
   return (
     <div>
       <div className="mb-2 text-xs uppercase text-muted-foreground">Tags</div>
-      <input className="mb-2 w-full rounded border px-2 py-1 text-sm" placeholder="Filter tags…" value={q} onChange={(e) => setQ(e.target.value)} />
-      <div className="space-y-1 text-sm">
+      <input
+        className="mb-2 w-full rounded border px-2 py-1 text-sm"
+        placeholder="Filter tags…"
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+      />
+      <div className="flex flex-wrap gap-2">
         {(data || []).slice(0, 20).map((t: any) => (
           <button
             key={t.slug}
-            className="w-full truncate rounded px-2 py-1 text-left hover:bg-accent disabled:cursor-not-allowed disabled:text-muted-foreground"
+            className="inline-flex items-center gap-2 rounded-full border border-border/60 px-3 py-1 text-xs font-medium text-muted-foreground transition hover:border-primary/40 hover:text-primary disabled:cursor-not-allowed disabled:text-muted-foreground"
             onClick={() => resultsEnabled && onOpenTag(t.slug)}
             title={`${t.label} (${t.count})`}
             disabled={!resultsEnabled}
           >
-            #{t.label} <span className="text-xs text-muted-foreground">{t.count}</span>
+            <span
+              className="h-2.5 w-2.5 rounded-full"
+              style={{ backgroundColor: t.color || 'var(--primary)' }}
+            />
+            <span className="truncate">{t.label}</span>
+            <span className="text-[11px] text-muted-foreground">{t.count}</span>
           </button>
         ))}
-        {!resultsEnabled && (
-          <div className="text-xs text-muted-foreground">Results modal disabled.</div>
-        )}
       </div>
+      {!resultsEnabled && (
+        <div className="mt-2 text-xs text-muted-foreground">Results modal disabled.</div>
+      )}
     </div>
   )
 }
