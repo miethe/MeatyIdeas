@@ -13,6 +13,10 @@ import { apiGet, apiJson } from '@/lib/apiClient'
 import { FolderPathCombobox } from '@/components/files/folder-path-combobox'
 import { FolderCreateDialog } from '@/components/files/folder-create-dialog'
 import { span } from '@/lib/telemetry'
+import { TagMultiInput } from '@/components/files/tag-multi-input'
+import { MarkdownEditor } from '@/components/files/markdown-editor'
+import { ProjectInlineCreateDialog } from '@/components/projects/project-inline-create-dialog'
+import { getConfig } from '@/lib/config'
 
 function slugify(value: string): string {
   return value
@@ -56,9 +60,10 @@ export default function CreateFilePage() {
   const [folder, setFolder] = React.useState('')
   const [filename, setFilename] = React.useState('')
   const [filenameEdited, setFilenameEdited] = React.useState(false)
-  const [tags, setTags] = React.useState('')
+  const [selectedTags, setSelectedTags] = React.useState<string[]>([])
   const [description, setDescription] = React.useState('')
   const [content, setContent] = React.useState('')
+  const [typeKey, setTypeKey] = React.useState('')
   const [templateId, setTemplateId] = React.useState('blank')
   const [pendingFolder, setPendingFolder] = React.useState<string | null>(null)
   const [folderDialogOpen, setFolderDialogOpen] = React.useState(false)
@@ -67,6 +72,7 @@ export default function CreateFilePage() {
   const [dirty, setDirty] = React.useState(false)
   const [lastSavedFileId, setLastSavedFileId] = React.useState<string | null>(null)
   const [lastSavedProjectId, setLastSavedProjectId] = React.useState<string | null>(null)
+  const [createProjectOpen, setCreateProjectOpen] = React.useState(false)
 
   const projectsQuery = useQuery({
     queryKey: ['projects-nav'],
@@ -77,6 +83,16 @@ export default function CreateFilePage() {
       return []
     },
     staleTime: 10_000,
+  })
+
+  const { data: config } = useQuery({ queryKey: ['config'], queryFn: getConfig, staleTime: 60_000 })
+  const tagQuery = useQuery({
+    queryKey: ['tags', 'all'],
+    queryFn: async () => {
+      const rows = await apiGet<any[]>(`/tags?limit=200`)
+      return rows?.map((row) => (typeof row?.label === 'string' ? row.label : null)).filter(Boolean) as string[]
+    },
+    staleTime: 60_000,
   })
 
   const projectOptions = React.useMemo(() => {
@@ -143,12 +159,9 @@ export default function CreateFilePage() {
     },
     onSuccess: ({ response, closeAfterSave }, variables) => {
       const fileId = response?.id as string | undefined
-      if (!fileId) {
-        toast.success('File created')
-        return
-      }
       span('ui.create.file', { project_id: variables.projectId, mode: 'full' })
       toast.success('File created')
+      if (!fileId) return
       resetAfterSave(fileId, variables.projectId)
       qc.invalidateQueries({ queryKey: ['files', variables.projectId] })
       qc.invalidateQueries({ queryKey: ['recent-files'] })
@@ -200,6 +213,25 @@ export default function CreateFilePage() {
 
   const isSaving = createMutation.isPending || updateMutation.isPending
 
+  const handleTypeSelect = async (value: string) => {
+    if (value === '__create__') {
+      const label = window.prompt('New type name')?.trim()
+      if (!label) return
+      try {
+        const created = await apiJson<any>('POST', '/file-types', { label })
+        qc.invalidateQueries({ queryKey: ['config'] })
+        setTypeKey(created.key)
+        setDirty(true)
+        toast.success('Type created')
+      } catch (error: any) {
+        toast.error(error?.detail || 'Unable to create type')
+      }
+      return
+    }
+    setTypeKey(value)
+    setDirty(true)
+  }
+
   const handleSave = (closeAfterSave: boolean) => {
     if (!selectedProjectId) {
       toast.error('Select a project before saving')
@@ -210,18 +242,15 @@ export default function CreateFilePage() {
       toast.error('Filename required')
       return
     }
-    const tagList = tags
-      .split(',')
-      .map((t) => t.trim())
-      .filter(Boolean)
     const frontMatter: Record<string, unknown> = {}
-    if (tagList.length) frontMatter.tags = tagList
+    if (selectedTags.length) frontMatter.tags = selectedTags
     if (description.trim()) frontMatter.description = description.trim()
+    if (typeKey) frontMatter.type = typeKey
     const payload: SavePayload = {
       projectId: selectedProjectId,
       title: title || undefined,
       path: computedPath,
-      tags: tagList,
+      tags: selectedTags,
       frontMatter: Object.keys(frontMatter).length ? frontMatter : undefined,
       content,
       closeAfterSave,
@@ -253,6 +282,18 @@ export default function CreateFilePage() {
   }, [initialProjectFromQuery, selectedProjectId])
 
   const actionDisabled = !selectedProjectId || isSaving
+  const typeOptions = config?.FILE_TYPE_OPTIONS ?? []
+  const statusOptions = config?.PROJECT_STATUS_OPTIONS ?? [
+    { key: 'idea', label: 'Idea' },
+    { key: 'discovery', label: 'Discovery' },
+    { key: 'draft', label: 'Draft' },
+    { key: 'live', label: 'Live' },
+    { key: 'archived', label: 'Archived' },
+  ]
+  const templateOptions = config?.PROJECT_TEMPLATES ?? [
+    { key: 'blank', label: 'Blank', description: 'Start from scratch' },
+  ]
+  const tagSuggestions = tagQuery.data ?? []
 
   return (
     <AppShell currentProjectId={selectedProjectId}>
@@ -281,7 +322,12 @@ export default function CreateFilePage() {
               <select
                 value={selectedProjectId ?? ''}
                 onChange={(event) => {
-                  setSelectedProjectId(event.target.value || null)
+                  const value = event.target.value
+                  if (value === '__create__') {
+                    setCreateProjectOpen(true)
+                    return
+                  }
+                  setSelectedProjectId(value || null)
                   setDirty(true)
                 }}
                 className="focus-ring block w-full rounded-md border bg-background px-3 py-2"
@@ -292,6 +338,7 @@ export default function CreateFilePage() {
                     {proj.name}
                   </option>
                 ))}
+                <option value="__create__">Create new project…</option>
               </select>
             </div>
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -364,16 +411,34 @@ export default function CreateFilePage() {
                 />
               </div>
             </div>
-            <div className="space-y-1">
-              <label className="text-sm font-medium">Tags</label>
-              <Input
-                value={tags}
-                placeholder="PRD, Discovery"
-                onChange={(event) => {
-                  setTags(event.target.value)
-                  setDirty(true)
-                }}
-              />
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <div className="space-y-1">
+                <label className="text-sm font-medium">Type</label>
+                <select
+                  value={typeKey}
+                  onChange={(event) => void handleTypeSelect(event.target.value)}
+                  className="focus-ring block w-full rounded-md border bg-background px-3 py-2"
+                >
+                  <option value="">Select type…</option>
+                  {typeOptions.map((opt) => (
+                    <option key={opt.key} value={opt.key}>
+                      {opt.label}
+                    </option>
+                  ))}
+                  <option value="__create__">Create new type…</option>
+                </select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-sm font-medium">Tags</label>
+                <TagMultiInput
+                  value={selectedTags}
+                  onChange={(next) => {
+                    setSelectedTags(next)
+                    setDirty(true)
+                  }}
+                  suggestions={tagSuggestions}
+                />
+              </div>
             </div>
             <div className="space-y-1">
               <label className="text-sm font-medium">Description</label>
@@ -389,15 +454,15 @@ export default function CreateFilePage() {
             </div>
             <div className="space-y-1">
               <label className="text-sm font-medium">Content</label>
-              <Textarea
+              <MarkdownEditor
                 value={content}
-                onChange={(event) => {
-                  setContent(event.target.value)
+                onChange={(value) => {
+                  setContent(value)
                   setDirty(true)
                 }}
-                placeholder="# Title\n\nStart writing..."
-                className="font-mono"
-                rows={16}
+                projectId={selectedProjectId}
+                disabled={isSaving}
+                minRows={16}
               />
             </div>
             <div className="rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
@@ -436,6 +501,17 @@ export default function CreateFilePage() {
           }}
         />
       )}
+      <ProjectInlineCreateDialog
+        open={createProjectOpen}
+        onOpenChange={setCreateProjectOpen}
+        statusOptions={statusOptions}
+        templateOptions={templateOptions}
+        onCreated={(proj) => {
+          setCreateProjectOpen(false)
+          setSelectedProjectId(proj.id)
+          projectsQuery.refetch().catch(() => {})
+        }}
+      />
     </AppShell>
   )
 }

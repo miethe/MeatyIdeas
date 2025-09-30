@@ -207,6 +207,14 @@ export const FilePreviewSchema = z.object({
 })
 export type FilePreview = z.infer<typeof FilePreviewSchema>
 
+export const FileProjectContextSchema = z.object({
+  id: z.string(),
+  slug: z.string(),
+  name: z.string(),
+  color: z.string().nullable().optional(),
+})
+export type FileProjectContext = z.infer<typeof FileProjectContextSchema>
+
 export const FileSchema = z.object({
   id: z.string(),
   project_id: z.string(),
@@ -224,6 +232,7 @@ export const FileSchema = z.object({
   updated_at: z.string(),
   metadata_fields: z.array(MetadataFieldSchema).default([]),
   metadata_signature: z.string().nullable().optional(),
+  project: FileProjectContextSchema.nullable().optional(),
 })
 export type FileItem = z.infer<typeof FileSchema>
 

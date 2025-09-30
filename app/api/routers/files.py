@@ -153,7 +153,11 @@ def _looks_plain_text(value: str) -> bool:
     return all(ord(ch) >= 32 or ch in "\n\r\t" for ch in snippet)
 
 
-def _serialize_file(file_obj: File, tag_lookup: dict[str, Tag] | None = None) -> FileRead:
+def _serialize_file(
+    file_obj: File,
+    tag_lookup: dict[str, Tag] | None = None,
+    project: Project | None = None,
+) -> FileRead:
     front_matter = file_obj.front_matter or {}
     tags = list(file_obj.tags or [])
     tag_details = build_tag_details(tags, tag_lookup)
@@ -172,6 +176,15 @@ def _serialize_file(file_obj: File, tag_lookup: dict[str, Tag] | None = None) ->
         truncated_description = None
     metadata_fields = build_metadata_fields(front_matter)
     metadata_signature = build_metadata_signature(front_matter)
+    project_payload = None
+    if project is not None:
+        project_payload = {
+            "id": project.id,
+            "slug": project.slug,
+            "name": project.name,
+            "color": getattr(project, "color", None),
+        }
+
     return FileRead(
         id=file_obj.id,
         project_id=file_obj.project_id,
@@ -189,6 +202,7 @@ def _serialize_file(file_obj: File, tag_lookup: dict[str, Tag] | None = None) ->
         updated_at=file_obj.updated_at,
         metadata_fields=metadata_fields,
         metadata_signature=metadata_signature,
+        project=project_payload,
     )
 
 
@@ -257,7 +271,7 @@ def _create_file_internal(
     if tags:
         tag_rows = db.scalars(select(Tag).where(Tag.slug.in_({slugify(tag) for tag in tags if slugify(tag)}))).all()
         tag_lookup = {row.slug: row for row in tag_rows}
-    serialized = _serialize_file(f, tag_lookup)
+    serialized = _serialize_file(f, tag_lookup, project=project)
     serialized_dict = serialized.model_dump() if hasattr(serialized, "model_dump") else serialized.dict()
     metadata_fields_payload = serialized_dict.get("metadata_fields", [])
     tags_payload = serialized_dict.get("tags", [])
@@ -383,12 +397,13 @@ def get_file(file_id: str, db: Session = Depends(get_db)):
     f = db.get(File, file_id)
     if not f:
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND"})
+    project = db.get(Project, f.project_id) if f.project_id else None
     tag_lookup: dict[str, Tag] = {}
     if f.tags:
         slug_set = {slugify(tag) for tag in f.tags if isinstance(tag, str)}
         rows = db.scalars(select(Tag).where(Tag.slug.in_(slug_set))).all()
         tag_lookup = {row.slug: row for row in rows}
-    return _serialize_file(f, tag_lookup)
+    return _serialize_file(f, tag_lookup, project=project)
 
 
 @router.get("/{file_id}/preview", response_model=FilePreviewResponse)
@@ -545,7 +560,7 @@ def update_file(file_id: str, body: FileCreate, db: Session = Depends(get_db)):
         slug_set = {slugify(tag) for tag in f.tags if isinstance(tag, str)}
         rows = db.scalars(select(Tag).where(Tag.slug.in_(slug_set))).all()
         tag_lookup = {row.slug: row for row in rows}
-    serialized = _serialize_file(f, tag_lookup)
+    serialized = _serialize_file(f, tag_lookup, project=project)
     serialized_dict = serialized.model_dump() if hasattr(serialized, "model_dump") else serialized.dict()
     metadata_fields_payload = serialized_dict.get("metadata_fields", [])
     metadata_signature = serialized_dict.get("metadata_signature")

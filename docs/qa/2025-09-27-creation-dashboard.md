@@ -10,7 +10,12 @@
 - Project selector required when opened globally; defaults when invoked in project scope.
 - Path builder validation: disallow forward slash in filename, blank filename error.
 - Folder combobox disabled until project selected; create folder flow from combobox.
-- Save file: toasts, file appears in project list, recent files rail updates.
+- Expand toggle loads full form without losing inputs; collapse restores quick layout.
+- Inline project creation entry launches mini dialog, auto-selects new project on success.
+- Type picker reads `/config` options and allows inline creation; new type appears immediately.
+- Tag pill input supports auto-complete and freeform entries; removing tags updates front-matter.
+- Markdown toolbar buttons apply formatting; backlink picker lists project files, inserting `[[Title]]` at cursor.
+- Save file: toasts, file appears in project list, recent files rail updates, router navigates to the new file.
 
 ## Full-Screen Create Flow
 - Landing page loads with project selector, template dropdown (Blank), description field, preview pane.
@@ -18,6 +23,9 @@
 - `Save & Close` returns to project page and opens file modal.
 - Dirty tracking: Save & Close disabled when no changes pending, re-enabled after edits.
 - Preview updates within ~300ms when typing; handles large content gracefully.
+- Inline project creation available from project select; new project auto-selected after creation.
+- Type dropdown mirrors config options and supports inline creation via prompt.
+- Tag pill input mirrors Quick Create behavior; markdown toolbar/backlinks available in full editor.
 
 ## Dashboard Sort & Quick Filters
 - Sort dropdown reflects current selection, persists in URL, and re-orders list accordingly.

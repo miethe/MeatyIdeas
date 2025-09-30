@@ -37,6 +37,9 @@ def test_project_files_metadata_and_directories():
     created = create_resp.json()
     file_id = created["id"]
     assert any(field["key"] == "status" for field in created["metadata_fields"])
+    assert created.get("project") is not None
+    assert created["project"]["id"] == project_id
+    assert created["project"].get("slug")
 
     files_resp = client.get(f"/api/projects/{project_id}/files", headers=HEADERS)
     assert files_resp.status_code == 200
@@ -61,6 +64,8 @@ def test_project_files_metadata_and_directories():
     status_field_after = next((field for field in updated["metadata_fields"] if field["key"] == "status"), None)
     assert status_field_after is not None
     assert status_field_after["value"] == "in-review"
+    assert updated.get("project") is not None
+    assert updated["project"]["id"] == project_id
 
     with SessionLocal() as session:
         events = (

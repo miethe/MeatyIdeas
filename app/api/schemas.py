@@ -122,6 +122,13 @@ class MetadataField(BaseModel):
     kind: str | None = None
 
 
+class FileProjectContext(BaseModel):
+    id: str
+    slug: str
+    name: str
+    color: str | None = None
+
+
 class FileRead(BaseModel):
     id: str
     project_id: str
@@ -139,6 +146,7 @@ class FileRead(BaseModel):
     updated_at: dt.datetime
     metadata_fields: list[MetadataField] = Field(default_factory=list)
     metadata_signature: str | None = None
+    project: FileProjectContext | None = None
 
     class Config:
         from_attributes = True

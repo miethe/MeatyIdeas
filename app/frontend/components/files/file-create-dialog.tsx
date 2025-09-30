@@ -1,6 +1,7 @@
 "use client"
 
 import React from 'react'
+import { useRouter } from 'next/navigation'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -10,8 +11,12 @@ import { toast } from 'sonner'
 
 import { FolderPathCombobox } from './folder-path-combobox'
 import { FolderCreateDialog } from './folder-create-dialog'
+import { TagMultiInput } from './tag-multi-input'
+import { MarkdownEditor } from './markdown-editor'
+import { ProjectInlineCreateDialog } from '@/components/projects/project-inline-create-dialog'
+import { getConfig } from '@/lib/config'
 
-type CreatePayload = {
+ type CreatePayload = {
   projectId: string
   title?: string
   path: string
@@ -28,6 +33,13 @@ type FileCreateDialogProps = {
   children?: React.ReactNode
 }
 
+type ProjectOption = {
+  id: string
+  name: string
+  slug?: string
+  color?: string | null
+}
+
 export function FileCreateDialog({
   projectId,
   initialProjectId,
@@ -35,6 +47,7 @@ export function FileCreateDialog({
   onOpenChange,
   children,
 }: FileCreateDialogProps) {
+  const router = useRouter()
   const [internalOpen, setInternalOpen] = React.useState(false)
   const open = controlledOpen ?? internalOpen
   const qc = useQueryClient()
@@ -43,12 +56,16 @@ export function FileCreateDialog({
   const [selectedProjectId, setSelectedProjectId] = React.useState<string | null>(contextProjectId)
   const [title, setTitle] = React.useState('')
   const [folder, setFolder] = React.useState('')
-  const [filename, setFilename] = React.useState('')
+  const [filename, setFilename] = React.useState('untitled.md')
   const [filenameEdited, setFilenameEdited] = React.useState(false)
-  const [tags, setTags] = React.useState('')
+  const [selectedTags, setSelectedTags] = React.useState<string[]>([])
+  const [typeKey, setTypeKey] = React.useState('')
+  const [description, setDescription] = React.useState('')
   const [content, setContent] = React.useState('')
   const [pendingFolder, setPendingFolder] = React.useState<string | null>(null)
   const [folderDialogOpen, setFolderDialogOpen] = React.useState(false)
+  const [expanded, setExpanded] = React.useState(false)
+  const [createProjectOpen, setCreateProjectOpen] = React.useState(false)
 
   const projectsQuery = useQuery({
     queryKey: ['projects-nav'],
@@ -62,10 +79,38 @@ export function FileCreateDialog({
     enabled: open,
   })
 
-  const projects = React.useMemo(() => {
-    if (Array.isArray(projectsQuery.data)) return projectsQuery.data as Array<{ id: string; name: string }>
-    return [] as Array<{ id: string; name: string }>
+  const { data: config } = useQuery({ queryKey: ['config'], queryFn: getConfig, staleTime: 60_000 })
+
+  const tagQuery = useQuery({
+    queryKey: ['tags', 'all'],
+    queryFn: async () => {
+      const rows = await apiGet<any[]>(`/tags?limit=200`)
+      return rows?.map((row) => (typeof row?.label === 'string' ? row.label : null)).filter(Boolean) as string[]
+    },
+    enabled: open,
+    staleTime: 60_000,
+  })
+
+  const projects = React.useMemo<ProjectOption[]>(() => {
+    const raw = projectsQuery.data
+    if (!raw) return []
+    if (Array.isArray(raw)) return raw as ProjectOption[]
+    return []
   }, [projectsQuery.data])
+
+  const tagSuggestions = tagQuery.data ?? []
+
+  const statusOptions = config?.PROJECT_STATUS_OPTIONS ?? [
+    { key: 'idea', label: 'Idea' },
+    { key: 'discovery', label: 'Discovery' },
+    { key: 'draft', label: 'Draft' },
+    { key: 'live', label: 'Live' },
+    { key: 'archived', label: 'Archived' },
+  ]
+  const templateOptions = config?.PROJECT_TEMPLATES ?? [
+    { key: 'blank', label: 'Blank', description: 'Start from scratch' },
+  ]
+  const typeOptions = config?.FILE_TYPE_OPTIONS ?? []
 
   const resetForm = React.useCallback(
     (preserveSelection = false) => {
@@ -73,9 +118,12 @@ export function FileCreateDialog({
       setFolder('')
       setFilename('untitled.md')
       setFilenameEdited(false)
-      setTags('')
+      setSelectedTags([])
+      setTypeKey('')
+      setDescription('')
       setContent('')
       setPendingFolder(null)
+      setExpanded(false)
       if (!preserveSelection) {
         setSelectedProjectId(contextProjectId)
       }
@@ -83,9 +131,20 @@ export function FileCreateDialog({
     [contextProjectId]
   )
 
+  const handleOpenCreatedFile = React.useCallback(
+    (created: any, projectIdentifier: string) => {
+      if (!created || !created.id) return
+      const projectContext = created.project || projects.find((proj) => proj.id === projectIdentifier)
+      const slug = projectContext?.slug || projects.find((proj) => proj.id === projectIdentifier)?.slug
+      const target = slug || projectIdentifier
+      router.push(`/projects/${target}?file=${created.id}`)
+    },
+    [projects, router]
+  )
+
   const mutateCreate = useMutation({
     mutationFn: async ({ projectId: targetProjectId, title: titleValue, path, tags: tagList, frontMatter, content: body }: CreatePayload) =>
-      apiJson('POST', '/files', {
+      apiJson<any>('POST', '/files', {
         project_id: targetProjectId,
         title: titleValue,
         path,
@@ -93,7 +152,7 @@ export function FileCreateDialog({
         tags: tagList.length > 0 ? tagList : undefined,
         front_matter: frontMatter,
       }),
-    onSuccess: (_, variables) => {
+    onSuccess: (created, variables) => {
       span('ui.create.file', { project_id: variables.projectId, mode: 'quick' })
       toast.success('File created')
       qc.invalidateQueries({ queryKey: ['files', variables.projectId] })
@@ -101,6 +160,7 @@ export function FileCreateDialog({
       qc.invalidateQueries({ queryKey: ['projects-nav'] })
       qc.invalidateQueries({ queryKey: ['recent-files'] })
       handleDialogOpenChange(false)
+      handleOpenCreatedFile(created, variables.projectId)
     },
     onError: (error: any) => {
       const message = error?.detail?.message || 'Failed to create file'
@@ -139,7 +199,7 @@ export function FileCreateDialog({
     if (!open) return
     if (!filenameEdited) {
       const slug = slugify(title)
-      setFilename(slug ? `${slug}.md` : '')
+      setFilename(slug ? `${slug}.md` : 'untitled.md')
     }
   }, [open, title, filenameEdited])
 
@@ -177,36 +237,78 @@ export function FileCreateDialog({
       toast.error('Filename required')
       return
     }
-    const tagList = tags
-      .split(',')
-      .map((t) => t.trim())
-      .filter(Boolean)
-    const frontMatter = tagList.length > 0 ? { tags: tagList } : undefined
+    const frontMatter: Record<string, unknown> = {}
+    if (selectedTags.length > 0) frontMatter.tags = selectedTags
+    if (typeKey) frontMatter.type = typeKey
+    if (description.trim()) frontMatter.description = description.trim()
     mutateCreate.mutate({
       projectId: selectedProjectId,
       title: title || undefined,
       path: computedPath,
-      tags: tagList,
-      frontMatter,
+      tags: selectedTags,
+      frontMatter: Object.keys(frontMatter).length ? frontMatter : undefined,
       content,
     })
   }
+
+  const handleTypeSelect = async (value: string) => {
+    if (value === '__create__') {
+      const label = window.prompt('New type name')?.trim()
+      if (!label) return
+      try {
+        const created = await apiJson<any>('POST', '/file-types', { label })
+        qc.invalidateQueries({ queryKey: ['config'] })
+        setTypeKey(created.key)
+        toast.success('Type created')
+      } catch (error: any) {
+        toast.error(error?.detail || 'Unable to create type')
+      }
+      return
+    }
+    setTypeKey(value)
+  }
+
+  const dialogWidth = expanded ? 'sm:max-w-[840px]' : 'sm:max-w-[680px]'
 
   return (
     <>
       <Dialog open={open} onOpenChange={handleDialogOpenChange}>
         {children ? <DialogTrigger asChild>{children}</DialogTrigger> : null}
-        <DialogContent className="sm:max-w-[680px]">
+        <DialogContent className={dialogWidth}>
           <DialogHeader>
-            <DialogTitle>New Markdown File</DialogTitle>
-            <DialogDescription>Pick a destination, add optional tags, and start writing.</DialogDescription>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <DialogTitle>New Markdown File</DialogTitle>
+                <DialogDescription>Pick a destination, add metadata, and start writing.</DialogDescription>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setExpanded((prev) => {
+                    const next = !prev
+                    span('file.create.expand', { mode: 'quick_dialog', expanded: next })
+                    return next
+                  })
+                }}
+              >
+                {expanded ? 'Compact view' : 'Expand form'}
+              </Button>
+            </div>
           </DialogHeader>
           <form className="mt-2 space-y-4" onSubmit={handleSubmit}>
             <div className="space-y-1">
-              <label className="text-sm">Project</label>
+              <label className="text-sm font-medium">Project</label>
               <select
                 value={selectedProjectId ?? ''}
-                onChange={(event) => setSelectedProjectId(event.target.value || null)}
+                onChange={(event) => {
+                  const value = event.target.value
+                  if (value === '__create__') {
+                    setCreateProjectOpen(true)
+                    return
+                  }
+                  setSelectedProjectId(value || null)
+                }}
                 className="focus-ring block w-full rounded-md border bg-background px-3 py-2"
                 disabled={projectsQuery.isLoading || mutateCreate.isPending}
                 required
@@ -217,18 +319,19 @@ export function FileCreateDialog({
                     {proj.name}
                   </option>
                 ))}
+                <option value="__create__">Create new project…</option>
               </select>
-              {!selectedProjectId && <p className="text-xs text-muted-foreground">Choose a project to enable folder selection and creation.</p>}
+              {!selectedProjectId && <p className="text-xs text-muted-foreground">Choose a project to enable folder selection and backlinks.</p>}
             </div>
             <div className="space-y-1">
-              <label className="text-sm">Title</label>
+              <label className="text-sm font-medium">Title</label>
               <input
                 value={title}
                 onChange={(event) => {
                   setTitle(event.target.value)
                   if (!filenameEdited) {
                     const slug = slugify(event.target.value)
-                    setFilename(slug ? `${slug}.md` : '')
+                    setFilename(slug ? `${slug}.md` : 'untitled.md')
                   }
                 }}
                 placeholder="Feature PRD"
@@ -237,7 +340,7 @@ export function FileCreateDialog({
             </div>
             <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
               <div className="space-y-1">
-                <label className="text-sm">Folder</label>
+                <label className="text-sm font-medium">Folder</label>
                 <FolderPathCombobox
                   projectId={selectedProjectId ?? undefined}
                   value={folder}
@@ -255,7 +358,7 @@ export function FileCreateDialog({
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-sm">Filename</label>
+                <label className="text-sm font-medium">Filename</label>
                 <input
                   value={filename}
                   onChange={(event) => {
@@ -267,25 +370,44 @@ export function FileCreateDialog({
                 />
               </div>
             </div>
-            <div className="space-y-1">
-              <label className="text-sm">Tags (comma separated)</label>
-              <input
-                value={tags}
-                onChange={(event) => setTags(event.target.value)}
-                placeholder="PRD, Idea"
-                className="focus-ring block w-full rounded-md border bg-background px-3 py-2"
-              />
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              <div className="space-y-1">
+                <label className="text-sm font-medium">Type</label>
+                <select
+                  value={typeKey}
+                  onChange={(event) => void handleTypeSelect(event.target.value)}
+                  className="focus-ring block w-full rounded-md border bg-background px-3 py-2"
+                  disabled={mutateCreate.isPending}
+                >
+                  <option value="">Select type…</option>
+                  {typeOptions.map((opt) => (
+                    <option key={opt.key} value={opt.key}>
+                      {opt.label}
+                    </option>
+                  ))}
+                  <option value="__create__">Create new type…</option>
+                </select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-sm font-medium">Tags</label>
+                <TagMultiInput value={selectedTags} onChange={setSelectedTags} suggestions={tagSuggestions} disabled={mutateCreate.isPending} />
+              </div>
             </div>
+            {expanded && (
+              <div className="space-y-1">
+                <label className="text-sm font-medium">Description</label>
+                <textarea
+                  value={description}
+                  onChange={(event) => setDescription(event.target.value)}
+                  placeholder="Short summary for metadata"
+                  className="focus-ring block w-full rounded-md border bg-background px-3 py-2 text-sm"
+                  rows={3}
+                />
+              </div>
+            )}
             <div className="space-y-1">
-              <label className="text-sm">Content</label>
-              <textarea
-                value={content}
-                onChange={(event) => setContent(event.target.value)}
-                placeholder="# Title
-
-Write some markdown..."
-                className="focus-ring block h-44 w-full rounded-md border bg-background px-3 py-2 font-mono text-sm"
-              />
+              <label className="text-sm font-medium">Content</label>
+              <MarkdownEditor value={content} onChange={setContent} projectId={selectedProjectId} disabled={mutateCreate.isPending} minRows={expanded ? 16 : 10} />
             </div>
             <div className="rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
               Path preview: <span className="font-mono text-foreground">/{buildPath()}</span>
@@ -316,10 +438,20 @@ Write some markdown..."
           }}
         />
       )}
+      <ProjectInlineCreateDialog
+        open={createProjectOpen}
+        onOpenChange={setCreateProjectOpen}
+        statusOptions={statusOptions}
+        templateOptions={templateOptions}
+        onCreated={(proj) => {
+          setCreateProjectOpen(false)
+          setSelectedProjectId(proj.id)
+          projectsQuery.refetch().catch(() => {})
+        }}
+      />
     </>
   )
 }
-
 
 function slugify(value: string): string {
   return value
